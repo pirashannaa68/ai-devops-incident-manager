@@ -11,8 +11,8 @@ REPO_DIR="."
 DOCKER_BUILD_TIMEOUT=300
 
 log() { echo -e "$1"; }
-pass() { echo -e "  ${GREEN}✓ PASS${NC} $1"; }
-fail() { echo -e "  ${RED}✗ FAIL${NC} $1"; }
+pass() { echo -e "  ${GREEN}[PASS]${NC} $1"; }
+fail() { echo -e "  ${RED}[FAIL]${NC} $1"; }
 hint() { echo -e "    ${YELLOW}Hint:${NC} $1"; }
 stop_at() {
   echo -e "\n${RED}${BOLD}Validation failed at $1. Fix the errors above and try again.${NC}"

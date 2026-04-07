@@ -1,3 +1,11 @@
+---
+title: AI DevOps Incident Manager
+emoji: 📉
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 8000
+---
 # DevOps Incident Management Environment (DIME)
 
 A high-fidelity reinforcement learning environment for evaluating decision-making agents in complex, distributed system incident response. The environment simulates an 8-service microservice topology where an agent must diagnose, mitigate, and resolve production incidents under stochastic chaos and infrastructural cost constraints.
@@ -6,7 +14,7 @@ A high-fidelity reinforcement learning environment for evaluating decision-makin
 
 ## 1. Problem the Environment Solves
 
-In modern Site Reliability Engineering (SRE), incident response is characterized by **Partial Observability** and **Temporal Dependencies**. Engineers must navigate a "sea of noise"—telemetry, logs, and alerts—to identify the underlying root cause while minimizing Time To Recovery (TTR) and Service Level Agreement (SLA) breaches.
+In modern Site Reliability Engineering (SRE), incident response is characterized by **Partial Observability** and **Temporal Dependencies**. Engineers must navigate a "sea of noise" - telemetry, logs, and alerts - to identify the underlying root cause while minimizing Time To Recovery (TTR) and Service Level Agreement (SLA) breaches.
 
 DIME formalizes this challenge as a Markov Decision Process (MDP), providing a standardized platform to train and benchmark agents on:
 - **Causal Reasoning:** Distinguishing between symptom services (e.g., a frontend timeout) and root-cause services (e.g., a database locking issue).
@@ -33,28 +41,28 @@ The environment adopts a distributed microservice topology consisting of 8 disti
 
 ## 3. RL Environment Design (State, Action, Reward)
 
-### State Space ($\mathcal{S}$)
-The state $\mathcal{S}$ is represented as a structured observation vector containing:
+### State Space (S)
+The state S is represented as a structured observation vector containing:
 - **Service Telemetry:** Real-time performance metrics for all 8 nodes.
 - **Alert Buffer:** A FIFO queue of critical system alerts.
 - **Action Context:** Feedback from the agent's prior interaction.
 - **Global Accounting:** Cumulative infrastructural cost and downtime duration.
 
-### Action Space ($\mathcal{A}$)
-The action space $\mathcal{A}$ is discrete and targeted, allowing for both investigation and remediation:
+### Action Space (A)
+The action space A is discrete and targeted, allowing for both investigation and remediation:
 - `get_logs(target, filter)`: Retrieve filtered telemetry logs (Low cost, high information gain).
 - `restart_service(target)`: Hard reboot of a node (High TTR penalty).
 - `scale_service(target)`: Horizontal scaling (High run-rate cost, removes CPU bottlenecks).
 - `rollback_deployment(target)`: Reverts deployments (Resolves configuration-based failures).
 - `add_db_index(target)`: Database optimization (Delayed effect, permanent latency reduction).
 
-### Reward Function ($\mathcal{R}$)
+### Reward Function (R)
 The reward function is dense and shaped to optimize for efficient resolution:
 - **Exploration Signal (+0.05 to +0.30):** Issued upon investigating the correct root-cause service.
 - **Resolution Reward (+0.50):** Issued upon successful mitigation of the primary incident.
 - **Efficiency Penalties (-0.10):** Applied for blind actions (remediation without prior investigation) or redundant commands.
-- **Terminal Grade ($G \in [0, 1]$):** Calculated at episode termination based on the normalized efficiency score:
-  $G = \max(0, \text{Success} - (\text{Steps} \times w_s) - (\text{Cost} \times w_c) - (\text{Downtime} \times w_d))$
+- **Terminal Grade (G in [0, 1]):** Calculated at episode termination based on the normalized efficiency score:
+  G = max(0, Success - (Steps * ws) - (Cost * wc) - (Downtime * wd))
 
 ---
 
