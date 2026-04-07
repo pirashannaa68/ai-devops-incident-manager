@@ -25,6 +25,8 @@ Usage:
     python -m server.app
 """
 
+import os
+
 # API Configuration and Environment Variables
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o")
@@ -41,7 +43,6 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 import sys
-import os
 
 # Add project root to sys.path to allow robust imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,10 +75,10 @@ def main(host: str = "127.0.0.1", port: int = 8000):
     """
     import uvicorn
     
-    print("\n" + "—"*60)
+    print("\n" + "-"*60)
     print(" [SYSTEM] DevOps Incident Management Environment Initializing...")
     print(f" [URL]    Access Interface: http://localhost:{port}")
-    print("—"*60 + "\n")
+    print("-" * 60 + "\n")
 
     uvicorn.run(app, host=host, port=port, log_level="info")
 
