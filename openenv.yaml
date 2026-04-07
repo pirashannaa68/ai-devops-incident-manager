@@ -1,0 +1,18 @@
+spec_version: 1
+name: my_env
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+description: "AI DevOps Chaos Incident Manager — a real-world SRE environment where agents diagnose and resolve distributed system failures under uncertainty."
+tasks:
+  - name: easy
+    description: "Resolve a CPU spike on auth-api by investigating logs and restarting the service."
+    max_steps: 15
+  - name: medium
+    description: "Triage two simultaneous incidents: a bad deployment on payment-gateway and a disk OOM on search-index."
+    max_steps: 15
+  - name: hard
+    description: "Identify a cascading DB latency issue causing web-frontend 504s while managing Redis OOM and Chaos Engine events."
+    max_steps: 15
+
