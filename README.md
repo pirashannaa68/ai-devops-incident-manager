@@ -1,4 +1,15 @@
+---
+title: AI DevOps Incident Manager
+emoji: 🛠️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # DevOps Incident Management Environment (DIME)
+
 
 Professional Site Reliability Engineering simulation for evaluating reinforcement learning agents in complex distributed systems.
 
