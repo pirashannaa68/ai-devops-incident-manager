@@ -198,7 +198,7 @@ class MyEnvironment(Environment):
     def grade(self) -> float:
         """
         Computes the final episode grade incorporating resolution status and SLA-based penalties.
-        Normalized to the [0.0, 1.0] range.
+        Normalized to strictly within the (0.0, 1.0) range for Phase 2 validation requirements.
         """
         success = 1.0 if self.state_data["problem_solved"] else 0.0
         
@@ -208,7 +208,7 @@ class MyEnvironment(Environment):
         downtime_penalty = (self.total_downtime * 0.02)
         
         raw_score = success - step_penalty - cost_penalty - downtime_penalty
-        return max(0.0, round(raw_score, 2))
+        return max(0.01, min(0.99, round(raw_score, 2)))
 
     def step(self, action: DevOpsAction) -> DevOpsObservation:  # type: ignore[override]
         """
