@@ -1,9 +1,12 @@
-# DevOps Incident Management Environment (DIME)
-# High-fidelity SRE simulation for Reinforcement Learning research.
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
 
 """
-Data models for the DevOps Incident Management Environment.
-Defines the observation and action spaces utilizing strictly-typed Pydantic schemas.
+DevOps Incident Management Environment (DIME) Data Models.
+
+This module defines the strictly-typed schemas for communication between
+the environment server and the diagnostic agent. It utilizes Pydantic 
+for validation and OpenAPI schema generation.
 """
 
 from typing import Literal, List, Optional
@@ -11,6 +14,9 @@ from openenv.core.env_server.types import Action, Observation
 from pydantic import BaseModel, Field
 
 class ServiceStatus(BaseModel):
+    """
+    Status and telemetry metrics for an individual microservice.
+    """
     name: str = Field(description="Name of the microservice")
     status: Literal["running", "degraded", "down"] = Field(description="Current status of the service")
     severity: Literal["low", "medium", "critical"] = Field(default="medium", description="Priority level of the service for SLAs")
@@ -22,26 +28,35 @@ class ServiceStatus(BaseModel):
 
 class DevOpsAction(Action):
     """
-    Defines the discrete action space for environment remediation.
+    Discrete action space for system inspection and remediation.
+    
+    Attributes:
+        command: Literal identifier for the operation to execute.
+        target: The resource (service or table) affected by the command.
+        args: Optional parameters for command modification (e.g., log filtering).
     """
     command: Literal["get_logs", "restart_service", "rollback_deployment", "add_db_index", "scale_service", "wait", "finish"] = Field(
-        ..., description="The command to execute (e.g., get logs to investigate, restart a service, scale a service, or finish if resolved)"
+        ..., description="The command to execute"
     )
     target: str = Field(
-        ..., description="The target identifier for the command. This is usually the service name (e.g., 'auth-api', 'payment-gateway', 'database', 'web-frontend') or table name (e.g. 'transactions')."
+        ..., description="The target identifier for the command"
     )
     args: Optional[str] = Field(
-        default=None, description="Optional arguments for the command (e.g., a regex or keyword to grep within logs)."
+        default=None, description="Optional arguments for the command"
     )
 
 class DevOpsObservation(Observation):
     """
-    Defines the state observation space yielded by the environment.
+    State observation yielded by the environment iteration.
+    
+    Contains system telemetry, active alerts, and feedback from the previous action
+    to inform the agent's next decision.
     """
     task_description: str = Field(default="", description="Description of the active task or incident")
     active_alerts: List[str] = Field(default_factory=list, description="List of active system alerts")
     services: List[ServiceStatus] = Field(default_factory=list, description="Current status of all system services")
-    action_feedback: str = Field(default="", description="Feedback or log output resulting from the last action")
+    action_feedback: str = Field(default="", description="Log output or status resulting from the last action")
     step_count: int = Field(default=0, description="Current step count in the simulation episode")
-    total_cost: float = Field(default=0.0, description="Cumulative infrastructural cost incurred.")
-    total_downtime: float = Field(default=0.0, description="Cumulative downtime SLA penalty.")
+    total_cost: float = Field(default=0.0, description="Cumulative infrastructural cost incurred")
+    total_downtime: float = Field(default=0.0, description="Cumulative downtime SLA penalty")
+

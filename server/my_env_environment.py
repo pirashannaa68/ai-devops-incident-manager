@@ -1,3 +1,14 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+"""
+Core environment implementation for DevOps Incident Management.
+
+This module defines the Markov Decision Process (MDP) for the SRE simulation,
+incorporating multi-service dependencies, stochastic failure modes, and
+cost-aware reward structures.
+"""
+
 import copy
 import random
 from typing import Dict, Any, List
@@ -14,7 +25,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from models import DevOpsAction, DevOpsObservation, ServiceStatus
+from models import DevOpsAction, DevOpsObservation, ServiceStatus  # type: ignore
 
 # Synthetic telemetry for control-plane services to evaluate agent discrimination between signal and noise.
 DISTRACTORS = {
@@ -103,6 +114,15 @@ HARD_STATE = {
 }
 
 def get_service_objects(services_dict: Dict) -> List[ServiceStatus]:
+    """
+    Parses raw service telemetry data into Pydantic status models.
+    
+    Args:
+        services_dict: Mapping of service names to telemetry attributes.
+        
+    Returns:
+        A list of validated ServiceStatus objects for the observation space.
+    """
     return [
         ServiceStatus(
             name=name,
@@ -119,15 +139,18 @@ def get_service_objects(services_dict: Dict) -> List[ServiceStatus]:
 
 class MyEnvironment(Environment):
     """
-    DevOps Incident Manager Environment.
-
-    A reinforcement learning environment simulating a distributed microservice topology.
-    Manages the Markov state transitions, reward logic, and action processing for an SRE agent.
+    State-machine implementation for the DevOps Incident Manager.
+    
+    Manages the lifecycle of an SRE incident episode, including state 
+    transitions, reward calculation, and multi-service causal effects.
     """
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
     MAX_STEPS = 15
 
     def __init__(self):
+        """
+        Initializes the environment instance with default telemetry and SLA tracking.
+        """
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.state_data = copy.deepcopy(EASY_STATE)
         self.task_name = "easy"
@@ -141,7 +164,13 @@ class MyEnvironment(Environment):
 
     def reset(self, task_name: str = "easy") -> DevOpsObservation:
         """
-        Resets the environment state based on the designated curriculum task.
+        Transitions the environment to a fresh state based on the selected task.
+        
+        Args:
+            task_name: Identifier for the scenario configuration (easy, medium, hard).
+            
+        Returns:
+            The initial DevOpsObservation for the new episode.
         """
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.task_name = task_name
@@ -173,7 +202,10 @@ class MyEnvironment(Environment):
         )
 
     def trigger_chaos(self):
-        """Randomly introduce failures to healthy systems mid-incident."""
+        """
+        Injects a stochastic failure event into a healthy service.
+        Simulates unexpected infrastructure anomalies independent of the primary incident.
+        """
         healthy_targets = [k for k, v in self.state_data["services"].items() if v["status"] == "running"]
         if not healthy_targets:
             return
@@ -197,8 +229,13 @@ class MyEnvironment(Environment):
 
     def grade(self) -> float:
         """
-        Computes the final episode grade incorporating resolution status and SLA-based penalties.
-        Normalized to strictly within the (0.0, 1.0) range for Phase 2 validation requirements.
+        Finalizes the episode performance score.
+        
+        The score aggregates resolution success penalized by cumulative steps, 
+        infrastructural burn-rate, and downtime SLA violations.
+        
+        Returns:
+            A normalized floating point score in the range (0.01, 0.99).
         """
         success = 1.0 if self.state_data["problem_solved"] else 0.0
         
@@ -212,7 +249,13 @@ class MyEnvironment(Environment):
 
     def step(self, action: DevOpsAction) -> DevOpsObservation:  # type: ignore[override]
         """
-        Applies the provided action, executes Markov state transitions, and calculates the reward.
+        Coordinates the environment state transition for a single discrete step.
+        
+        Args:
+            action: The remediation or diagnostic command provided by the agent.
+            
+        Returns:
+            The resulting system observation and step-specific reward signal.
         """
         self._state.step_count += 1
         reward = 0.0
@@ -231,21 +274,19 @@ class MyEnvironment(Environment):
             self.trigger_chaos()
             feedback += "\n[ALERT] System anomaly detected. Evaluate telemetry for secondary fault injection.\n"
 
-        # 3. Process Delayed Tasks (Partial Fixes over time)
+        # Apply background system dynamics (cost, downtime, chaos, and delayed task processing)
         tasks_to_keep = []
         for task in self.delayed_tasks:
             task["delay"] -= 1
             if task["delay"] <= 0:
-                # Apply partial fix for DB index
                 if task["action"] == "add_db_index" and task["target"] == "transactions":
                     self.state_data["problem_solved"] = True
                     svc = self.state_data["services"]["database"]
-                    # Slowly cooldown latency (PARTIAL FIX)
                     svc["latency_ms"] = max(5.0, svc["latency_ms"] * 0.25)
                     svc["cpu_usage"] = max(25.0, svc["cpu_usage"] * 0.5)
                     svc["status"] = "running"
                     self.state_data["services"]["web-frontend"]["error_rate"] = max(0.0, self.state_data["services"]["web-frontend"]["error_rate"] - 5.0)
-                    feedback += f"\n[DELAYED EVENT] The index applied on {task['target']} is taking effect. DB latency partially cooling down."
+                    feedback += f"\n[EVENT] DB index application complete on {task['target']}."
             else:
                 tasks_to_keep.append(task)
         self.delayed_tasks = tasks_to_keep
@@ -279,9 +320,9 @@ class MyEnvironment(Environment):
         if action.command == "finish":
             done = True
             if not self.state_data["problem_solved"]:
-                feedback += "Finished early without resolving core incidents! Major SLA penalty."
+                feedback += "Termination requested without resolution. Critical failure penalty applied."
             else:
-                feedback += "Incident marked as resolved."
+                feedback += "Incident resolved successfully."
             return self._build_obs(feedback, reward, done)
 
         # Helper method
@@ -376,6 +417,10 @@ class MyEnvironment(Environment):
         return self._build_obs(feedback, reward, done)
 
     def _build_obs(self, feedback: str, reward: float, done: bool = False) -> DevOpsObservation:
+        """
+        Constructs the observation object for the current step.
+        Calculates the terminal reward if the episode is finished.
+        """
         self.total_reward += reward
 
         if done:

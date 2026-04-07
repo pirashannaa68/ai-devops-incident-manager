@@ -1,104 +1,110 @@
----
-title: AI DevOps Incident Manager
-emoji: 📉
-colorFrom: blue
-colorTo: purple
-sdk: docker
-app_port: 8000
----
 # DevOps Incident Management Environment (DIME)
 
-A high-fidelity reinforcement learning environment for evaluating decision-making agents in complex, distributed system incident response. The environment simulates an 8-service microservice topology where an agent must diagnose, mitigate, and resolve production incidents under stochastic chaos and infrastructural cost constraints.
+Professional Site Reliability Engineering simulation for evaluating reinforcement learning agents in complex distributed systems.
 
----
+## 1. Project Overview
+The DevOps Incident Management Environment (DIME) provides a high-fidelity simulation of an 8-service distributed microservice topology. It models a production-grade infrastructure, complete with real-time telemetry, service logs, and a causal failure graph. The environment serves as a platform for training and evaluating agents on complex, real-world Site Reliability Engineering (SRE) incident response tasks.
 
-## 1. Problem the Environment Solves
+## 2. Motivation
+Modern distributed systems exhibit emergent failure modes that are difficult to model in static environments. DIME captures the core challenges of SRE work:
+- **Uncertainty**: Agents must disambiguate true failure signals from noise across high-volume telemetry.
+- **Trade-offs**: Every remediation action (e.g., scaling or restarting) incurs infrastructural costs or Service Level Agreement (SLA) penalties.
+- **Cascading Dependencies**: Failures in downstream services (e.g., databases) propagate through the system, requiring root cause identification within a complex dependency tree.
 
-In modern Site Reliability Engineering (SRE), incident response is characterized by **Partial Observability** and **Temporal Dependencies**. Engineers must navigate a "sea of noise" - telemetry, logs, and alerts - to identify the underlying root cause while minimizing Time To Recovery (TTR) and Service Level Agreement (SLA) breaches.
+## 3. System Architecture
+The system implements a standard request-response loop between an agent and a simulated environment:
+- **Environment Server**: A FastAPI-based backend that manages the Markov Decision Process (MDP) state transitions (`MyEnvironment`).
+- **Data Models**: Pydantic-typed schemas ensure strictly-typed communication via the `DevOpsAction` and `DevOpsObservation` models.
+- **Inference Runner**: An execution script (`inference.py`) that coordinates agent interaction and logs performance metrics.
 
-DIME formalizes this challenge as a Markov Decision Process (MDP), providing a standardized platform to train and benchmark agents on:
-- **Causal Reasoning:** Distinguishing between symptom services (e.g., a frontend timeout) and root-cause services (e.g., a database locking issue).
-- **Cost-Benefit Optimization:** Balancing expensive mitigation strategies (e.g., service scaling) against cheaper investigative actions (e.g., log filtering).
-- **Stochastic Failure Resolution:** Managing incidents that evolve dynamically based on previous actions and environmental chaos.
+## 4. Environment Design
 
----
+### Observation Space
+The `DevOpsObservation` model provides a granular view of the system state:
+- **Service Metrics**: CPU usage, memory usage, latency (ms), and error rates for all 8 microservices.
+- **Active Alerts**: A list of high-priority system alerts (e.g., "CRITICAL: High CPU on auth-api").
+- **Cost & SLA Tracking**: Real-time accumulation of infrastructural burn-rate and cumulative downtime penalties.
+- **Action Feedback**: Direct output from diagnostic commands (e.g., filtered log snippets).
 
-## 2. System Architecture
+### Action Space
+Agents interact with the environment via a discrete set of commands:
+- `get_logs`: Retrieve and filter logs for a specific service.
+- `restart_service`: Power-cycle a service to clear transient errors (incurs downtime).
+- `rollback_deployment`: Revert to a previous stable version (resolves configuration errors).
+- `add_db_index`: Address query latency (requires 2 steps for completion).
+- `scale_service`: Horizontally scale resources to mitigate load (triples cost-per-minute).
+- `wait`: Observe the system for one step without taking action.
+- `finish`: Terminate the episode once the incident is resolved.
 
-The environment adopts a distributed microservice topology consisting of 8 distinct components:
+### Reward Function
+The reward function balances resolution speed, cost-efficiency, and system availability:
+- **Resolution Success**: Large positive signal upon verified problem resolution.
+- **Step Penalty**: Small negative signal per step to encourage efficient diagnosis.
+- **Cost Penalty**: Negative signal proportional to the infrastructure burn-rate.
+- **Downtime Penalty**: Cumulative penalty for services in a 'degraded' or 'down' state.
 
-- **Edge Layer:** `web-frontend` (Entry point for user traffic).
-- **Business Logic Layer:** `auth-api`, `payment-gateway`, `user-profile-api`.
-- **Worker Layer:** `notification-worker`, `search-index`.
-- **Persistence Layer:** `database` (PostgreSQL simulation), `redis-cache`.
+## 5. Task Design
+The environment includes three primary scenarios with increasing complexity:
+- **Easy**: Isolate and resolve a CPU spike on a single service (`auth-api`) through direct intervention.
+- **Medium**: Triage a multi-incident failure involving a faulty deployment and secondary service degradation.
+- **Hard**: Diagnose cascading database latency causing upstream availability issues, while managing resource constraints.
+- **Stochasticity**: A chaos engine periodically introduces random secondary faults to healthy services to simulate "noisy" production environments.
 
-### Core Components
-- **Simulation Engine:** Implements the state transition logic, casualty propagation, and chaos injection (15% stochastic failure rate).
-- **Observability Interface:** Provides real-time metrics (CPU, Memory, Latency, Error Rate) and log access.
-- **Remediation API:** Standardized interface for executing system-level actions.
+## 6. Expected Outputs
+- **Interaction Format**: All actions and observations are exchanged as structured JSON objects.
+- **Logging Standards**: The system emits standardized logs to `stdout` for automated scoring:
+  - `[START] task={task_name} env={env_id} model={model_id}`
+  - `[STEP] step={n} action={json} reward={r} done={bool}`
+  - `[END] success={bool} steps={n} score={0.0-1.0} rewards={list}`
 
----
+## 7. Evaluation Criteria
+### Environment Integrity
+- **Realism**: Alignment of failure modes with real-world SRE scenarios.
+- **Consistency**: Reproducibility of state transitions across episodes.
+- **Learnability**: Clarity of the reward signal for reinforcement learning.
 
-## 3. RL Environment Design (State, Action, Reward)
+### Agent Performance
+- **Success Rate**: Frequency of verified incident resolution within step limits.
+- **Resource Efficiency**: Total steps taken to reach resolution.
+- **Economic Impact**: Minimization of cumulative infrastructure cost and downtime penalties.
 
-### State Space (S)
-The state S is represented as a structured observation vector containing:
-- **Service Telemetry:** Real-time performance metrics for all 8 nodes.
-- **Alert Buffer:** A FIFO queue of critical system alerts.
-- **Action Context:** Feedback from the agent's prior interaction.
-- **Global Accounting:** Cumulative infrastructural cost and downtime duration.
+## 8. Baseline Performance
+Expected outcomes based on standard agent implementations:
+- **Random Agent**: Score ≈ 0.01. Primarily fails due to random exploration without resolution.
+- **Rule-based Agent**: Score ≈ 0.40 - 0.60. Successfully resolves simple deterministic scenarios but struggles with cascading failures.
+- **State-of-the-art Agent**: Score ≈ 0.85+. Demonstrates causal reasoning and cost-aware remediation.
 
-### Action Space (A)
-The action space A is discrete and targeted, allowing for both investigation and remediation:
-- `get_logs(target, filter)`: Retrieve filtered telemetry logs (Low cost, high information gain).
-- `restart_service(target)`: Hard reboot of a node (High TTR penalty).
-- `scale_service(target)`: Horizontal scaling (High run-rate cost, removes CPU bottlenecks).
-- `rollback_deployment(target)`: Reverts deployments (Resolves configuration-based failures).
-- `add_db_index(target)`: Database optimization (Delayed effect, permanent latency reduction).
+## 9. Setup Instructions
+### Installation
+1. Ensure Python 3.10+ is installed.
+2. Initialize the environment:
+   ```bash
+   uv sync
+   # or
+   pip install -e .
+   ```
 
-### Reward Function (R)
-The reward function is dense and shaped to optimize for efficient resolution:
-- **Exploration Signal (+0.05 to +0.30):** Issued upon investigating the correct root-cause service.
-- **Resolution Reward (+0.50):** Issued upon successful mitigation of the primary incident.
-- **Efficiency Penalties (-0.10):** Applied for blind actions (remediation without prior investigation) or redundant commands.
-- **Terminal Grade (G in [0, 1]):** Calculated at episode termination based on the normalized efficiency score:
-  G = max(0, Success - (Steps * ws) - (Cost * wc) - (Downtime * wd))
+### Docker Support
+Build the production image for isolated evaluation:
+```bash
+docker build -t openenv/my_env_env:latest .
+```
 
----
+## 10. Usage Instructions
+### Starting the Environment
+Run the FastAPI server locally:
+```bash
+python -m server.app
+```
 
-## 4. Evaluation Criteria
-
-The environment is designed to provide a robust signal for policy evaluation across several critical metrics:
-
-### 1. Reasoning Gap (Policy Differentiation)
-A valid environment must show significant performance variance between heuristic and learned policies.
-- **Random Baseline:** ~0.05 (Captures only trivial, accidental resolutions).
-- **Rule-Based Baseline:** ~0.35 (Solves easy/medium tasks with high step counts).
-- **Optimal Frontier (LLM/PPO):** ~0.75+ (Demonstrates efficient, cost-aware root cause analysis).
-
-### 2. Reward Stationarity and Signal-to-Noise
-The dense reward signals are strictly tied to the causal path of the incident. This ensures that the credit assignment problem is solvable even with the 15-step horizon, as agents receive feedback on partial progress (e.g., identifying the correct service).
-
-### 3. Task Entropy and Generalization
-The three tasks (Easy, Medium, Hard) provide increasing levels of "incident noise" and service inter-dependencies. A high-quality agent must generalize across these scenarios rather than overfit to specific service names.
-
-### 4. Normalized Convergence
-All episode grades are clamped to the `[0.0, 1.0]` range, providing a stable target for regression or reinforcement learning objectives.
-
----
-
-## 5. Usage and Validation
+### Running the Agent
+Execute the inference benchmark across all scenarios:
+```bash
+python inference.py
+```
 
 ### Validation
-To ensure the environment satisfies the OpenEnv specification:
+Verify the environment specification:
 ```bash
 openenv validate
 ```
-
-### Execution
-Run the baseline inference script to generate standardized execution logs:
-```bash
-uv run python inference.py
-```
-
-*Note: Environment variables `OPENAI_API_KEY`, `API_BASE_URL`, and `MODEL_NAME` must be configured for LLM-based evaluation.*
