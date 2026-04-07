@@ -1,12 +1,8 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+# DevOps Incident Management Environment (DIME)
+# High-fidelity SRE simulation for Reinforcement Learning research.
 
 """
-Data models for the DevOps Incident Manager.
-
+Data models for the DevOps Incident Management Environment.
 Defines the observation and action spaces utilizing strictly-typed Pydantic schemas.
 """
 

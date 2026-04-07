@@ -5,13 +5,13 @@ from typing import List
 from openai import OpenAI
 from openenv.core.env_server.types import State
 
-# Setup API parameters strictly per competition checks
+# API Configuration and Environment Variables
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
-# API key logic for local or remote usage
-API_KEY = os.getenv("OPENAI_API_KEY") or HF_TOKEN or "mock-token-123"
+# Authentication Priority: Environment Variable > HuggingFace Token > Local Access
+API_KEY = os.getenv("OPENAI_API_KEY") or HF_TOKEN or "local-dev-token"
 TASK_NAME = "DevOps Incident Manager Environment"
 BENCHMARK = "DevOps"
 TEMPERATURE = 0.0

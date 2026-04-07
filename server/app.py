@@ -1,8 +1,5 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+# DevOps Incident Management Environment (DIME)
+# High-fidelity SRE simulation for Reinforcement Learning research.
 
 """
 FastAPI application for the My Env Environment.
@@ -27,6 +24,14 @@ Usage:
     # Or run directly:
     python -m server.app
 """
+
+# API Configuration and Environment Variables
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+# Authentication Priority: Environment Variable > HuggingFace Token > Local Access
+API_KEY = os.getenv("OPENAI_API_KEY") or HF_TOKEN or "local-dev-token"
 
 try:
     from openenv.core.env_server.http_server import create_app
@@ -69,12 +74,12 @@ def main(host: str = "127.0.0.1", port: int = 8000):
     """
     import uvicorn
     
-    print("\n" + "="*50)
-    print("🚀 DevOps Incident Manager Server starting...")
-    print(f"👉 CLICK TO OPEN: http://localhost:{port}")
-    print("="*50 + "\n")
+    print("\n" + "—"*60)
+    print(" [SYSTEM] DevOps Incident Management Environment Initializing...")
+    print(f" [URL]    Access Interface: http://localhost:{port}")
+    print("—"*60 + "\n")
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == '__main__':

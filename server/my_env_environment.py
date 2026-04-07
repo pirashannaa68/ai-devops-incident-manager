@@ -16,7 +16,7 @@ if project_root not in sys.path:
 
 from models import DevOpsAction, DevOpsObservation, ServiceStatus
 
-# Background telemetry for healthy services to test observation processing and parsing logic
+# Synthetic telemetry for control-plane services to evaluate agent discrimination between signal and noise.
 DISTRACTORS = {
     "user-profile-api": {"status": "running", "severity": "low", "cpu_usage": 5.0, "memory_usage": 15.0, "latency_ms": 12.0, "error_rate": 0.01, "cost_per_minute": 0.1},
     "notification-worker": {"status": "running", "severity": "low", "cpu_usage": 22.0, "memory_usage": 45.0, "latency_ms": 50.0, "error_rate": 0.0, "cost_per_minute": 0.2},
@@ -134,7 +134,7 @@ class MyEnvironment(Environment):
         self.total_reward = 0.0
         self.last_action_str = ""
         
-        # New Chaos Mechanics
+        # State variables for cost-aware decision making and temporal dependencies
         self.total_cost = 0.0
         self.total_downtime = 0.0
         self.delayed_tasks = []
@@ -226,10 +226,10 @@ class MyEnvironment(Environment):
                 weight = 2.0 if svc["severity"] == "critical" else 1.0
                 self.total_downtime += weight
 
-        # 2. Chaos Generator (15% chance of random secondary failure)
+        # 2. Stochastic Chaos Injection (Stochastic state transition probability p=0.15)
         if random.random() < 0.15:
             self.trigger_chaos()
-            feedback += "\n[ALERT] A new intermittent issue has appeared. Check active alerts.\n"
+            feedback += "\n[ALERT] System anomaly detected. Evaluate telemetry for secondary fault injection.\n"
 
         # 3. Process Delayed Tasks (Partial Fixes over time)
         tasks_to_keep = []
@@ -273,7 +273,7 @@ class MyEnvironment(Environment):
 
         if self._state.step_count >= self.MAX_STEPS:
             done = True
-            feedback += "\nMax steps reached. Shift handover."
+            feedback += "\nMaximum episode horizon reached. Handing over to subsequent shift."
             return self._build_obs(feedback, reward, done)
 
         if action.command == "finish":
@@ -370,8 +370,8 @@ class MyEnvironment(Environment):
                 reward += 0.2
                 feedback += "Restarted redis-cache, memory cleared."
             elif action.command == "restart_service" and action.target == "database":
-                self.total_downtime += 10.0 # Huge downtime penalty
-                feedback += "Restarted database. Thundering herd effect. +10s Downtime penalty."
+                self.total_downtime += 10.0 # Significant SLA penalty for critical persistence layer downtime
+                feedback += "Restarted database. Thundering herd effects detected. SLA Penalty applied."
 
         return self._build_obs(feedback, reward, done)
 
