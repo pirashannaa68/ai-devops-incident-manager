@@ -84,10 +84,5 @@ def main(host: str = "0.0.0.0", port: int = 8000) -> None:
 
 
 if __name__ == "__main__":
-    import argparse
+    main()
 
-    parser = argparse.ArgumentParser(description="DevOps Incident Management Environment Server")
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--host", type=str, default="0.0.0.0")
-    args = parser.parse_args()
-    main(host=args.host, port=args.port)
