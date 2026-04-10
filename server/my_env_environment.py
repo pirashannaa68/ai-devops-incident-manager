@@ -297,6 +297,7 @@ class MyEnvironment(Environment):
                     svc["status"] = "running"
                     self.state_data["services"]["web-frontend"]["error_rate"] = max(0.0, self.state_data["services"]["web-frontend"]["error_rate"] - 5.0)
                     feedback += f"\n[EVENT] DB index application complete on {task['target']}."
+                    done = True  # Episode ends when the async index resolves the incident
             else:
                 tasks_to_keep.append(task)
         self.delayed_tasks = tasks_to_keep
