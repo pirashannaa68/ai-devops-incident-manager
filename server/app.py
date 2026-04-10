@@ -64,7 +64,7 @@ def read_root():
     return RedirectResponse(url="/docs")
 
 
-def main(host: str = "0.0.0.0", port: int = 7860) -> None:
+def main(host: str = "0.0.0.0", port: int = 8000) -> None:
     """
     Starts the uvicorn server.
 
