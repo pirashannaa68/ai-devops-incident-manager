@@ -6,122 +6,205 @@ colorTo: indigo
 sdk: docker
 app_port: 8000
 pinned: false
+tags:
+  - openenv
+  - devops
+  - sre
+  - evaluation
 ---
 
-# DevOps Incident Management Environment (DIME)
+# DevOps Incident Management Environment
 
+An [OpenEnv](https://github.com/meta-pytorch/OpenEnv) environment that simulates distributed system incident response. Each episode presents a production failure scenario; the agent must diagnose the root cause and apply the correct remediation using a discrete set of SRE commands.
 
-Professional Site Reliability Engineering simulation for evaluating reinforcement learning agents in complex distributed systems.
+## Quick Start
 
-## 1. Project Overview
-The DevOps Incident Management Environment (DIME) provides a high-fidelity simulation of an 8-service distributed microservice topology. It models a production-grade infrastructure, complete with real-time telemetry, service logs, and a causal failure graph. The environment serves as a platform for training and evaluating agents on complex, real-world Site Reliability Engineering (SRE) incident response tasks.
+```python
+from my_env import DevOpsAction, DevOpsEnv
 
-## 2. Motivation
-Modern distributed systems exhibit emergent failure modes that are difficult to model in static environments. DIME captures the core challenges of SRE work:
-- **Uncertainty**: Agents must disambiguate true failure signals from noise across high-volume telemetry.
-- **Trade-offs**: Every remediation action (e.g., scaling or restarting) incurs infrastructural costs or Service Level Agreement (SLA) penalties.
-- **Cascading Dependencies**: Failures in downstream services (e.g., databases) propagate through the system, requiring root cause identification within a complex dependency tree.
+try:
+    env = DevOpsEnv.from_docker_image("openenv/my_env_env:latest")
 
-## 3. System Architecture
-The system implements a standard request-response loop between an agent and a simulated environment:
-- **Environment Server**: A FastAPI-based backend that manages the Markov Decision Process (MDP) state transitions (`MyEnvironment`).
-- **Data Models**: Pydantic-typed schemas ensure strictly-typed communication via the `DevOpsAction` and `DevOpsObservation` models.
-- **Inference Runner**: An execution script (`inference.py`) that coordinates agent interaction and logs performance metrics.
+    obs = env.reset(task_name="easy")
+    print(obs.observation.active_alerts)
+    # ["CRITICAL: High CPU on auth-api (99%)"]
 
-## 4. Environment Design
+    result = env.step(DevOpsAction(command="get_logs", target="auth-api"))
+    print(result.observation.action_feedback)
+    # "[ERROR] Request queue full, dropping connects."
+
+    result = env.step(DevOpsAction(command="restart_service", target="auth-api"))
+    print(result.reward)   # 0.9 (resolved in 2 steps)
+    print(result.done)     # True
+
+finally:
+    env.close()
+```
+
+## Environment Design
 
 ### Observation Space
-The `DevOpsObservation` model provides a granular view of the system state:
-- **Service Metrics**: CPU usage, memory usage, latency (ms), and error rates for all 8 microservices.
-- **Active Alerts**: A list of high-priority system alerts (e.g., "CRITICAL: High CPU on auth-api").
-- **Cost & SLA Tracking**: Real-time accumulation of infrastructural burn-rate and cumulative downtime penalties.
-- **Action Feedback**: Direct output from diagnostic commands (e.g., filtered log snippets).
+
+Each step returns a `DevOpsObservation` with:
+
+| Field | Type | Description |
+|---|---|---|
+| `task_description` | `str` | Active incident pager message |
+| `active_alerts` | `List[str]` | Priority-tagged system alerts |
+| `services` | `List[ServiceStatus]` | Real-time telemetry for all 8 services |
+| `action_feedback` | `str` | Output from the last command |
+| `total_cost` | `float` | Cumulative infrastructure burn-rate |
+| `total_downtime` | `float` | Cumulative SLA penalty |
+| `done` | `bool` | Episode completion flag |
+| `reward` | `float` | Step reward signal |
+
+`ServiceStatus` fields: `name`, `status`, `severity`, `cpu_usage`, `memory_usage`, `latency_ms`, `error_rate`, `cost_per_minute`.
 
 ### Action Space
-Agents interact with the environment via a discrete set of commands:
-- `get_logs`: Retrieve and filter logs for a specific service.
-- `restart_service`: Power-cycle a service to clear transient errors (incurs downtime).
-- `rollback_deployment`: Revert to a previous stable version (resolves configuration errors).
-- `add_db_index`: Address query latency (requires 2 steps for completion).
-- `scale_service`: Horizontally scale resources to mitigate load (triples cost-per-minute).
-- `wait`: Observe the system for one step without taking action.
-- `finish`: Terminate the episode once the incident is resolved.
+
+Agents issue commands via `DevOpsAction(command, target, args?)`:
+
+| Command | Target | Effect |
+|---|---|---|
+| `get_logs` | service name | Returns filtered log output. Optional `args` for grep. |
+| `restart_service` | service name | Clears transient state. Incurs downtime penalty. |
+| `rollback_deployment` | service name | Reverts a faulty deployment. Resolves config errors. |
+| `add_db_index` | table name | Queues a deferred index creation (takes 2 steps). |
+| `scale_service` | service name | Reduces CPU load. Triples cost-per-minute. |
+| `wait` | `none` | Observes for one step without acting. |
+| `finish` | — | Terminates the episode. |
 
 ### Reward Function
-The reward function balances resolution speed, cost-efficiency, and system availability:
-- **Resolution Success**: Large positive signal upon verified problem resolution.
-- **Step Penalty**: Small negative signal per step to encourage efficient diagnosis.
-- **Cost Penalty**: Negative signal proportional to the infrastructure burn-rate.
-- **Downtime Penalty**: Cumulative penalty for services in a 'degraded' or 'down' state.
 
-## 5. Task Design
-The environment includes three primary scenarios with increasing complexity:
-- **Easy**: Isolate and resolve a CPU spike on a single service (`auth-api`) through direct intervention.
-- **Medium**: Triage a multi-incident failure involving a faulty deployment and secondary service degradation.
-- **Hard**: Diagnose cascading database latency causing upstream availability issues, while managing resource constraints.
-- **Stochasticity**: A chaos engine periodically introduces random secondary faults to healthy services to simulate "noisy" production environments.
+- `+0.05` — diagnostic action (`get_logs`)
+- `+0.10` — root-cause identification bonus (hard task only)
+- `+0.20–0.50` — correct remediation applied
+- `-0.10` — wrong target, repeated action, or blind index
+- **Terminal**: `grade()` replaces the final step reward, exposing the normalized score to the evaluator.
 
-## 6. Expected Outputs
-- **Interaction Format**: All actions and observations are exchanged as structured JSON objects.
-- **Logging Standards**: The system emits standardized logs to `stdout` for automated scoring:
-  - `[START] task={task_name} env={env_id} model={model_id}`
-  - `[STEP] step={n} action={json} reward={r} done={bool}`
-  - `[END] success={bool} steps={n} score={0.0-1.0} rewards={list}`
+`grade()` returns `0.01` for unresolved episodes and `0.30–0.99` for resolved episodes based on step efficiency.
 
-## 7. Evaluation Criteria
-### Environment Integrity
-- **Realism**: Alignment of failure modes with real-world SRE scenarios.
-- **Consistency**: Reproducibility of state transitions across episodes.
-- **Learnability**: Clarity of the reward signal for reinforcement learning.
+## Tasks
 
-### Agent Performance
-- **Success Rate**: Frequency of verified incident resolution within step limits.
-- **Resource Efficiency**: Total steps taken to reach resolution.
-- **Economic Impact**: Minimization of cumulative infrastructure cost and downtime penalties.
+Three scenarios of increasing complexity:
 
-## 8. Baseline Performance
+### Easy
+- **Scenario**: High CPU on `auth-api` causing elevated API latency.
+- **Root cause**: Thread pool exhaustion; clearable with `restart_service`.
+- **Optimal solution**: `get_logs auth-api` → `restart_service auth-api` (2 steps).
+- **Max score**: `0.90`
 
-Scores are computed by `env.grade()` and fall within `(0.01, 0.99)`.
+### Medium
+- **Scenario**: Concurrent incidents — faulty deployment on `payment-gateway` and disk OOM on `search-index`.
+- **Root cause**: Missing config key introduced in `v2.1` deployment.
+- **Optimal solution**: `get_logs payment-gateway` → `rollback_deployment payment-gateway` → `restart_service search-index` (3 steps).
+- **Max score**: `0.85`
 
-| Agent | Easy | Medium | Hard | Notes |
-|-------|------|--------|------|-------|
-| Random | 0.01 | 0.01 | 0.01 | No causal reasoning; never resolves incidents |
-| Rule-based | 0.60–0.85 | 0.35–0.60 | 0.05–0.15 | Heuristics handle simple cases; fails cascading failures |
-| LLM (GPT-4o) | 0.85–0.99 | 0.50–0.75 | 0.30–0.60 | Causal reasoning; efficiency varies by prompt depth |
+### Hard
+- **Scenario**: Cascading DB latency causing `web-frontend` 504s and Redis OOM.
+- **Root cause**: Missing index on `transactions.user_id` causing full table scans.
+- **Optimal solution**: `get_logs database` → `restart_service redis-cache` → `add_db_index transactions` → `wait` → `wait` (5 steps, async).
+- **Max score**: `0.76`
 
-Scores reflect step-efficiency: faster resolution = higher score (0.99 at step 1, 0.30 at step 15).
+A stochastic chaos engine (p=0.15 per step) injects secondary faults on healthy services to prevent pattern memorization.
 
-## 9. Setup Instructions
-### Installation
-1. Ensure Python 3.10+ is installed.
-2. Initialize the environment:
-   ```bash
-   uv sync
-   # or
-   pip install -e .
-   ```
+## Baseline Scores
 
-### Docker Support
-Build the production image for isolated evaluation:
+Scores are produced by `env.grade()` in range `(0.01, 0.99)`:
+
+| Agent | Easy | Medium | Hard |
+|---|---|---|---|
+| Random | 0.01 | 0.01 | 0.01 |
+| Rule-based | 0.60–0.85 | 0.35–0.60 | 0.05–0.15 |
+| LLM (GPT-4o) | 0.85–0.99 | 0.50–0.75 | 0.30–0.60 |
+
+Scores decay based on step efficiency: resolving at step 1 yields `0.99`, at step 15 yields `0.30`.
+
+## Project Structure
+
+```
+my_env/
+├── __init__.py                  # Public module exports
+├── openenv.yaml                 # OpenEnv manifest
+├── pyproject.toml               # Project metadata and dependencies
+├── Dockerfile                   # Container image definition
+├── README.md                    # This file
+├── models.py                    # Action and Observation Pydantic schemas
+├── client.py                    # DevOpsEnv HTTP/WebSocket client
+├── inference.py                 # Evaluation runner (random, rule-based, LLM agents)
+└── server/
+    ├── my_env_environment.py    # Core MDP — state transitions and reward logic
+    └── app.py                   # FastAPI application (HTTP + WebSocket endpoints)
+```
+
+## Setup
+
+### Local Development
+
+```bash
+# Install dependencies
+uv sync
+# or
+pip install -e .
+
+# Start the server
+uvicorn server.app:app --host 0.0.0.0 --port 8000
+
+# In a separate terminal, run the inference benchmark
+HF_TOKEN=<your_token> python inference.py
+```
+
+### Docker
+
 ```bash
 docker build -t openenv/my_env_env:latest .
+docker run -p 8000:8000 openenv/my_env_env:latest
 ```
 
-## 10. Usage Instructions
-### Starting the Environment
-Run the FastAPI server locally:
-```bash
-python -m server.app
-```
+### OpenEnv Validation
 
-### Running the Agent
-Execute the inference benchmark across all scenarios:
-```bash
-python inference.py
-```
-
-### Validation
-Verify the environment specification:
 ```bash
 openenv validate
 ```
+
+### Inference Benchmark
+
+The inference script runs all 3 tasks against 3 agent types and emits structured logs:
+
+```
+[START] task=easy env=DevOps model=random
+[STEP] step=1 action={"command":"get_logs","target":"auth-api"} reward=0.05 done=false error=null
+[STEP] step=2 action={"command":"restart_service","target":"auth-api"} reward=0.90 done=true error=null
+[END] success=true steps=2 rewards=0.05,0.90
+```
+
+Environment variables:
+
+| Variable | Default | Required |
+|---|---|---|
+| `API_BASE_URL` | `https://api.openai.com/v1` | No |
+| `MODEL_NAME` | `gpt-4o` | No |
+| `HF_TOKEN` | — | **Yes** |
+
+## Deployment
+
+Live at: `https://huggingface.co/spaces/Pirashannaa68/ai-devops-incident-manager`
+
+Endpoints:
+- `POST /reset` — Initialize episode with `{"task_name": "easy|medium|hard"}`
+- `POST /step` — Execute `DevOpsAction`
+- `GET /state` — Current episode state
+- `GET /docs` — Interactive API documentation
+- `GET /health` — Container health check
+
+## Use Cases
+
+- **Agent Evaluation**: Benchmark LLM diagnostic and remediation reasoning
+- **RL Training**: Dense reward signal across multi-step SRE workflows
+- **Curriculum Learning**: Progressive difficulty from single-service to cascading failures
+- **Research**: Causal reasoning under uncertainty in real-world production topologies
+
+## Learn More
+
+- [OpenEnv Documentation](https://github.com/meta-pytorch/OpenEnv)
+- [OpenEnv Environment Design Guide](https://github.com/meta-pytorch/OpenEnv/blob/main/README.md)

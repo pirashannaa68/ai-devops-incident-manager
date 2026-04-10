@@ -2,11 +2,17 @@
 # All rights reserved.
 
 """
-Core environment implementation for DevOps Incident Management.
+Core environment implementation for the DevOps Incident Manager.
 
-This module defines the Markov Decision Process (MDP) for the SRE simulation,
-incorporating multi-service dependencies, stochastic failure modes, and
-cost-aware reward structures.
+Defines the Markov Decision Process (MDP) for a distributed system incident
+response simulation. The environment exposes an 8-service topology with
+realistic telemetry, a stochastic chaos engine, and a cost-aware reward
+structure that evaluates both diagnostic accuracy and remediation efficiency.
+
+Episode Lifecycle:
+    1. reset(task_name)  — Load a scenario and return the initial observation.
+    2. step(action)      — Apply a remediation or diagnostic command.
+    3. grade()           — Return the normalized episode performance score.
 """
 
 import copy
@@ -20,158 +26,167 @@ from openenv.core.env_server.types import State, EnvironmentMetadata
 import sys
 import os
 
-# Add project root to sys.path to allow robust imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from models import DevOpsAction, DevOpsObservation, ServiceStatus  # type: ignore
 
-# Synthetic telemetry for control-plane services to evaluate agent discrimination between signal and noise.
-DISTRACTORS = {
-    "user-profile-api": {"status": "running", "severity": "low", "cpu_usage": 5.0, "memory_usage": 15.0, "latency_ms": 12.0, "error_rate": 0.01, "cost_per_minute": 0.1},
-    "notification-worker": {"status": "running", "severity": "low", "cpu_usage": 22.0, "memory_usage": 45.0, "latency_ms": 50.0, "error_rate": 0.0, "cost_per_minute": 0.2},
-    "redis-cache": {"status": "running", "severity": "medium", "cpu_usage": 8.0, "memory_usage": 80.0, "latency_ms": 1.5, "error_rate": 0.0, "cost_per_minute": 0.4},
-    "search-index": {"status": "running", "severity": "low", "cpu_usage": 14.0, "memory_usage": 30.0, "latency_ms": 18.0, "error_rate": 0.05, "cost_per_minute": 0.3},
+
+# ---------------------------------------------------------------------------
+# Distractor services — healthy background nodes included in every scenario
+# to evaluate the agent's ability to discriminate signal from noise.
+# ---------------------------------------------------------------------------
+DISTRACTORS: Dict[str, Dict] = {
+    "user-profile-api":   {"status": "running", "severity": "low",    "cpu_usage": 5.0,  "memory_usage": 15.0, "latency_ms": 12.0, "error_rate": 0.01, "cost_per_minute": 0.1},
+    "notification-worker":{"status": "running", "severity": "low",    "cpu_usage": 22.0, "memory_usage": 45.0, "latency_ms": 50.0, "error_rate": 0.0,  "cost_per_minute": 0.2},
+    "redis-cache":        {"status": "running", "severity": "medium", "cpu_usage": 8.0,  "memory_usage": 80.0, "latency_ms": 1.5,  "error_rate": 0.0,  "cost_per_minute": 0.4},
+    "search-index":       {"status": "running", "severity": "low",    "cpu_usage": 14.0, "memory_usage": 30.0, "latency_ms": 18.0, "error_rate": 0.05, "cost_per_minute": 0.3},
 }
 
-DISTRACTOR_LOGS = {
-    "user-profile-api": "2026-04-05T10:00 [INFO] Heartbeat OK.\n2026-04-05T10:01 [INFO] GET /profile/me 200 OK - 12ms",
+DISTRACTOR_LOGS: Dict[str, str] = {
+    "user-profile-api":    "2026-04-05T10:00 [INFO] Heartbeat OK.\n2026-04-05T10:01 [INFO] GET /profile/me 200 OK - 12ms",
     "notification-worker": "2026-04-05T10:00 [DEBUG] Batch processed 52 emails.\n2026-04-05T10:01 [INFO] Connected to SMTP relay.",
-    "redis-cache": "2026-04-05T10:00 [INFO] BGREWRITEAOF starting.\n2026-04-05T10:01 [INFO] Background append only file rewrite terms successful.",
-    "search-index": "2026-04-05T10:00 [INFO] Cluster state green.\n2026-04-05T10:01 [DEBUG] Indexing 120 documents."
+    "redis-cache":         "2026-04-05T10:00 [INFO] BGREWRITEAOF starting.\n2026-04-05T10:01 [INFO] Background append only file rewrite terms successful.",
+    "search-index":        "2026-04-05T10:00 [INFO] Cluster state green.\n2026-04-05T10:01 [DEBUG] Indexing 120 documents.",
 }
 
-# Initial states for the 3 tasks
-EASY_STATE = {
+
+# ---------------------------------------------------------------------------
+# Scenario definitions — one per task difficulty level.
+# Each scenario encodes the initial service topology, pre-seeded log corpus,
+# failure description, and a progress tracker for partial-credit scoring.
+# ---------------------------------------------------------------------------
+
+# Easy: single degraded service, clearable with a single restart.
+EASY_STATE: Dict = {
     "task_name": "easy",
     "description": "On-call Pager: HIGH CPU utilization detected on auth-api. API latency is increasing.",
     "alerts": ["CRITICAL: High CPU on auth-api (99%)"],
     "services": {
-        "web-frontend": {"status": "running", "severity": "critical", "cpu_usage": 15.0, "memory_usage": 32.0, "latency_ms": 25.0, "error_rate": 0.01, "cost_per_minute": 1.0},
-        "auth-api": {"status": "degraded", "severity": "critical", "cpu_usage": 99.5, "memory_usage": 65.0, "latency_ms": 1540.0, "error_rate": 2.5, "cost_per_minute": 0.5},
-        "payment-gateway": {"status": "running", "severity": "critical", "cpu_usage": 10.0, "memory_usage": 40.0, "latency_ms": 50.0, "error_rate": 0.0, "cost_per_minute": 2.5},
-        "database": {"status": "running", "severity": "critical", "cpu_usage": 35.0, "memory_usage": 55.0, "latency_ms": 5.0, "error_rate": 0.0, "cost_per_minute": 3.0},
-        **DISTRACTORS
+        "web-frontend":   {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 32.0, "latency_ms": 25.0,   "error_rate": 0.01, "cost_per_minute": 1.0},
+        "auth-api":       {"status": "degraded", "severity": "critical", "cpu_usage": 99.5, "memory_usage": 65.0, "latency_ms": 1540.0, "error_rate": 2.5,  "cost_per_minute": 0.5},
+        "payment-gateway":{"status": "running",  "severity": "critical", "cpu_usage": 10.0, "memory_usage": 40.0, "latency_ms": 50.0,   "error_rate": 0.0,  "cost_per_minute": 2.5},
+        "database":       {"status": "running",  "severity": "critical", "cpu_usage": 35.0, "memory_usage": 55.0, "latency_ms": 5.0,    "error_rate": 0.0,  "cost_per_minute": 3.0},
+        **DISTRACTORS,
     },
     "logs": {
-        "auth-api": "2026-04-05T09:59 [INFO] Server started.\n2026-04-05T10:00 [WARN] ThreadPool exhausted.\n2026-04-05T10:01 [ERROR] Request queue full, dropping connects. High CPU lock.",
-        "web-frontend": "2026-04-05T09:59 [INFO] Serving asset main.js.\n2026-04-05T10:01 [WARN] auth-api taking >1000ms to respond.",
+        "auth-api":        "2026-04-05T09:59 [INFO] Server started.\n2026-04-05T10:00 [WARN] ThreadPool exhausted.\n2026-04-05T10:01 [ERROR] Request queue full, dropping connects. High CPU lock.",
+        "web-frontend":    "2026-04-05T09:59 [INFO] Serving asset main.js.\n2026-04-05T10:01 [WARN] auth-api taking >1000ms to respond.",
         "payment-gateway": "2026-04-05T10:00 [INFO] Payment ping OK.",
-        "database": "2026-04-05T10:00 [INFO] Connection pool healthy.",
-        **DISTRACTOR_LOGS
+        "database":        "2026-04-05T10:00 [INFO] Connection pool healthy.",
+        **DISTRACTOR_LOGS,
     },
     "problem_solved": False,
-    "progress": {"checked_logs": False}
+    "progress": {"checked_logs": False},
 }
 
-# Task definition: Multi-incident failure with concurrent deployment errors and disk alerts
-MEDIUM_STATE = {
+# Medium: concurrent incidents — bad deployment and secondary disk failure.
+MEDIUM_STATE: Dict = {
     "task_name": "medium",
     "description": "On-call Pager: Elevated Error Rate on payment-gateway following a recent deployment. Search-index is also alerting.",
     "alerts": ["CRITICAL: High Error Rate on payment-gateway (15%)", "WARN: search-index cluster status red"],
     "services": {
-        "web-frontend": {"status": "running", "severity": "critical", "cpu_usage": 20.0, "memory_usage": 35.0, "latency_ms": 30.0, "error_rate": 1.5, "cost_per_minute": 1.0},
-        "auth-api": {"status": "running", "severity": "critical", "cpu_usage": 15.0, "memory_usage": 40.0, "latency_ms": 20.0, "error_rate": 0.0, "cost_per_minute": 0.5},
-        "payment-gateway": {"status": "degraded", "severity": "critical", "cpu_usage": 12.0, "memory_usage": 45.0, "latency_ms": 65.0, "error_rate": 15.5, "cost_per_minute": 2.5},
-        "database": {"status": "running", "severity": "critical", "cpu_usage": 25.0, "memory_usage": 50.0, "latency_ms": 6.0, "error_rate": 0.0, "cost_per_minute": 3.0},
-        **DISTRACTORS
+        "web-frontend":   {"status": "running",  "severity": "critical", "cpu_usage": 20.0, "memory_usage": 35.0, "latency_ms": 30.0, "error_rate": 1.5,  "cost_per_minute": 1.0},
+        "auth-api":       {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 40.0, "latency_ms": 20.0, "error_rate": 0.0,  "cost_per_minute": 0.5},
+        "payment-gateway":{"status": "degraded", "severity": "critical", "cpu_usage": 12.0, "memory_usage": 45.0, "latency_ms": 65.0, "error_rate": 15.5, "cost_per_minute": 2.5},
+        "database":       {"status": "running",  "severity": "critical", "cpu_usage": 25.0, "memory_usage": 50.0, "latency_ms": 6.0,  "error_rate": 0.0,  "cost_per_minute": 3.0},
+        **DISTRACTORS,
     },
     "logs": {
         "payment-gateway": "2026-04-05T09:59 [INFO] Container initializing.\n2026-04-05T10:00 [INFO] Deployment v2.1 finished.\n2026-04-05T10:01 [ERROR] TypeError: missing payment secret config key. Failed to process transaction.",
-        "web-frontend": "2026-04-05T10:00 [INFO] Client rendering profile.\n2026-04-05T10:01 [ERROR] Payment failed: 500 Internal Server Error from payment-gateway.",
-        "search-index": "2026-04-05T09:59 [WARN] Disk space critical.\n2026-04-05T10:01 [ERROR] Failed to write shard.",
-        "auth-api": "2026-04-05T10:00 [INFO] JWT validated.",
-        "database": "2026-04-05T10:00 [INFO] Connections at 10%.",
-        **{k:v for k,v in DISTRACTOR_LOGS.items() if k != "search-index"}
+        "web-frontend":    "2026-04-05T10:00 [INFO] Client rendering profile.\n2026-04-05T10:01 [ERROR] Payment failed: 500 Internal Server Error from payment-gateway.",
+        "search-index":    "2026-04-05T09:59 [WARN] Disk space critical.\n2026-04-05T10:01 [ERROR] Failed to write shard.",
+        "auth-api":        "2026-04-05T10:00 [INFO] JWT validated.",
+        "database":        "2026-04-05T10:00 [INFO] Connections at 10%.",
+        **{k: v for k, v in DISTRACTOR_LOGS.items() if k != "search-index"},
     },
     "problem_solved": False,
-    "progress": {"checked_logs": False, "search_fixed": False}
+    "progress": {"checked_logs": False, "search_fixed": False},
 }
 
-# Task definition: Cascading database latency affecting upstream frontends and concurrent cache exhaustion
-HARD_STATE = {
+# Hard: cascading failure — DB index miss causing full table scans, propagating
+# latency to web-frontend, with a concurrent Redis OOM. The fix requires
+# identifying the root cause before queuing the index, which takes 2 steps.
+HARD_STATE: Dict = {
     "task_name": "hard",
     "description": "On-call Pager: web-frontend timeout spike. Database alerts firing. Redis cache memory exhausted.",
     "alerts": ["CRITICAL: web-frontend Response Time > 5000ms", "WARN: database connection pool filling up", "CRITICAL: redis OOM"],
     "services": {
-        "web-frontend": {"status": "degraded", "severity": "critical", "cpu_usage": 45.0, "memory_usage": 60.0, "latency_ms": 5200.0, "error_rate": 12.0, "cost_per_minute": 1.0},
-        "auth-api": {"status": "running", "severity": "critical", "cpu_usage": 15.0, "memory_usage": 40.0, "latency_ms": 20.0, "error_rate": 0.0, "cost_per_minute": 0.5},
-        "payment-gateway": {"status": "running", "severity": "critical", "cpu_usage": 12.0, "memory_usage": 45.0, "latency_ms": 65.0, "error_rate": 0.0, "cost_per_minute": 2.5},
-        "database": {"status": "degraded", "severity": "critical", "cpu_usage": 88.0, "memory_usage": 90.0, "latency_ms": 4800.0, "error_rate": 1.5, "cost_per_minute": 3.0},
-        **DISTRACTORS
+        "web-frontend":   {"status": "degraded", "severity": "critical", "cpu_usage": 45.0, "memory_usage": 60.0, "latency_ms": 5200.0, "error_rate": 12.0, "cost_per_minute": 1.0},
+        "auth-api":       {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 40.0, "latency_ms": 20.0,   "error_rate": 0.0,  "cost_per_minute": 0.5},
+        "payment-gateway":{"status": "running",  "severity": "critical", "cpu_usage": 12.0, "memory_usage": 45.0, "latency_ms": 65.0,   "error_rate": 0.0,  "cost_per_minute": 2.5},
+        "database":       {"status": "degraded", "severity": "critical", "cpu_usage": 88.0, "memory_usage": 90.0, "latency_ms": 4800.0, "error_rate": 1.5,  "cost_per_minute": 3.0},
+        **DISTRACTORS,
     },
     "logs": {
-        "web-frontend": "2026-04-05T09:59 [INFO] Metric collection tick.\n2026-04-05T10:00 [ERROR] Timeout waiting for DB query from transactions service.\n2026-04-05T10:01 [ERROR] /checkout endpoint failed: 504 Gateway Timeout.",
-        "database": "2026-04-05T09:59 [INFO] Checkpoint written.\n2026-04-05T10:00 [WARN] Slow query detected on transactions table. Execution time: 5.2s. Missing index on user_id.\n2026-04-05T10:01 [WARN] CPU spiking due to full table scans.",
-        "redis-cache": "2026-04-05T10:00 [WARN] Memory approaching limit.\n2026-04-05T10:01 [ERROR] OOM command not allowed when used memory > 'maxmemory'.",
+        "web-frontend":    "2026-04-05T09:59 [INFO] Metric collection tick.\n2026-04-05T10:00 [ERROR] Timeout waiting for DB query from transactions service.\n2026-04-05T10:01 [ERROR] /checkout endpoint failed: 504 Gateway Timeout.",
+        "database":        "2026-04-05T09:59 [INFO] Checkpoint written.\n2026-04-05T10:00 [WARN] Slow query detected on transactions table. Execution time: 5.2s. Missing index on user_id.\n2026-04-05T10:01 [WARN] CPU spiking due to full table scans.",
+        "redis-cache":     "2026-04-05T10:00 [WARN] Memory approaching limit.\n2026-04-05T10:01 [ERROR] OOM command not allowed when used memory > 'maxmemory'.",
         "payment-gateway": "2026-04-05T10:00 [INFO] Payment ping OK.",
-        "auth-api": "2026-04-05T10:00 [INFO] JWT validated.",
-        **{k:v for k,v in DISTRACTOR_LOGS.items() if k != "redis-cache"}
+        "auth-api":        "2026-04-05T10:00 [INFO] JWT validated.",
+        **{k: v for k, v in DISTRACTOR_LOGS.items() if k != "redis-cache"},
     },
     "problem_solved": False,
-    "progress": {"checked_frontend_logs": False, "checked_db_logs": False, "identified_root": False, "redis_fixed": False}
+    "progress": {"checked_frontend_logs": False, "checked_db_logs": False, "identified_root": False, "redis_fixed": False},
 }
+
 
 def get_service_objects(services_dict: Dict) -> List[ServiceStatus]:
     """
-    Parses raw service telemetry data into Pydantic status models.
-    
+    Converts raw service telemetry dictionaries into typed Pydantic models.
+
     Args:
-        services_dict: Mapping of service names to telemetry attributes.
-        
+        services_dict: Mapping of service name to telemetry attribute dict.
+
     Returns:
-        A list of validated ServiceStatus objects for the observation space.
+        Validated ``ServiceStatus`` list for inclusion in a ``DevOpsObservation``.
     """
     return [
-        ServiceStatus(
-            name=name,
-            status=info["status"],
-            severity=info["severity"],
-            cpu_usage=info["cpu_usage"],
-            memory_usage=info["memory_usage"],
-            latency_ms=info["latency_ms"],
-            error_rate=info["error_rate"],
-            cost_per_minute=info["cost_per_minute"]
-        ) for name, info in services_dict.items()
+        ServiceStatus(name=name, **info)
+        for name, info in services_dict.items()
     ]
 
 
 class MyEnvironment(Environment):
     """
-    State-machine implementation for the DevOps Incident Manager.
-    
-    Manages the lifecycle of an SRE incident episode, including state 
-    transitions, reward calculation, and multi-service causal effects.
-    """
-    SUPPORTS_CONCURRENT_SESSIONS: bool = True
-    MAX_STEPS = 15
+    DevOps Incident Manager — OpenEnv MDP implementation.
 
-    def __init__(self):
-        """
-        Initializes the environment instance with default telemetry and SLA tracking.
-        """
+    Simulates a production SRE on-call workflow across three scenarios
+    of increasing complexity (easy → medium → hard). At each step, the
+    agent issues a command from the discrete action space and receives
+    an observation containing updated telemetry and action feedback.
+
+    Reward is shaped to encourage efficient, root-cause-first remediation.
+    A stochastic chaos engine (p=0.15) injects secondary faults to prevent
+    the agent from exploiting a fixed failure pattern across episodes.
+
+    The environment is fully self-contained and requires no external services.
+    """
+
+    SUPPORTS_CONCURRENT_SESSIONS: bool = True
+    MAX_STEPS: int = 15
+
+    def __init__(self) -> None:
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.state_data = copy.deepcopy(EASY_STATE)
         self.task_name = "easy"
         self.total_reward = 0.0
         self.last_action_str = ""
-        
-        # State variables for cost-aware decision making and temporal dependencies
         self.total_cost = 0.0
         self.total_downtime = 0.0
-        self.delayed_tasks = []
+        self.delayed_tasks: List[Dict] = []
 
     def reset(self, task_name: str = "easy", **kwargs: Any) -> DevOpsObservation:
         """
-        Transitions the environment to a fresh state based on the selected task.
-        
+        Loads a scenario and returns the initial observation.
+
         Args:
-            task_name: Identifier for the scenario configuration (easy, medium, hard).
-            **kwargs: Additional reset parameters accepted for framework compatibility.
-            
+            task_name: Scenario identifier — ``"easy"``, ``"medium"``, or ``"hard"``.
+            **kwargs: Accepted for framework compatibility; not used.
+
         Returns:
-            The initial DevOpsObservation for the new episode.
+            Initial ``DevOpsObservation`` with reward=0.0 and done=False.
         """
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.task_name = task_name
@@ -180,15 +195,9 @@ class MyEnvironment(Environment):
         self.total_cost = 0.0
         self.total_downtime = 0.0
         self.delayed_tasks = []
-        
-        if task_name == "easy":
-            self.state_data = copy.deepcopy(EASY_STATE)
-        elif task_name == "medium":
-            self.state_data = copy.deepcopy(MEDIUM_STATE)
-        elif task_name == "hard":
-            self.state_data = copy.deepcopy(HARD_STATE)
-        else:
-            self.state_data = copy.deepcopy(EASY_STATE)
+
+        scenario_map = {"easy": EASY_STATE, "medium": MEDIUM_STATE, "hard": HARD_STATE}
+        self.state_data = copy.deepcopy(scenario_map.get(task_name, EASY_STATE))
 
         return DevOpsObservation(
             task_description=self.state_data["description"],
@@ -199,179 +208,176 @@ class MyEnvironment(Environment):
             total_cost=0.0,
             total_downtime=0.0,
             done=False,
-            reward=0.0
+            reward=0.0,
         )
 
-    def trigger_chaos(self):
+    def trigger_chaos(self) -> None:
         """
-        Injects a stochastic failure event into a healthy service.
-        Simulates unexpected infrastructure anomalies independent of the primary incident.
+        Injects a stochastic failure into a randomly selected healthy service.
+
+        Simulates unexpected infrastructure anomalies that are independent of
+        the primary incident. Called with probability 0.15 at each step to
+        prevent agents from relying on a fixed failure signature.
         """
         healthy_targets = [k for k, v in self.state_data["services"].items() if v["status"] == "running"]
         if not healthy_targets:
             return
-        
+
         victim = random.choice(healthy_targets)
-        chaos_events = ["cpu_spike", "memory_leak", "latency_jitter"]
-        event = random.choice(chaos_events)
-        
+        event = random.choice(["cpu_spike", "memory_leak", "latency_jitter"])
         svc = self.state_data["services"][victim]
         svc["status"] = "degraded"
-        
+
         if event == "cpu_spike":
             svc["cpu_usage"] = min(100.0, svc["cpu_usage"] + 60.0)
-            self.state_data["alerts"].append(f"CHAOS EVENT: cpu_spike on {victim}")
         elif event == "memory_leak":
             svc["memory_usage"] = min(100.0, svc["memory_usage"] + 75.0)
-            self.state_data["alerts"].append(f"CHAOS EVENT: memory_leak on {victim}")
         elif event == "latency_jitter":
             svc["latency_ms"] = svc["latency_ms"] * 5.0
-            self.state_data["alerts"].append(f"CHAOS EVENT: latency_jitter on {victim}")
+
+        self.state_data["alerts"].append(f"CHAOS EVENT: {event} on {victim}")
 
     def grade(self) -> float:
         """
-        Finalizes the episode performance score.
+        Returns the normalized episode performance score.
 
         Scoring model:
-        - Unsolved episodes receive the minimum score (0.01).
-        - Solved episodes receive a score based on step efficiency:
-            1.0 for instant resolution, decaying to 0.30 at MAX_STEPS.
-        - A small bonus is awarded for resolving before the cost budget expires.
+          - Unresolved episodes: ``0.01`` (or up to ``0.15`` for partial diagnostic progress).
+          - Resolved episodes: ``0.99`` at step 1, decaying linearly to ``0.30`` at MAX_STEPS.
 
         Returns:
-            A normalized float score strictly within (0.01, 0.99).
+            Float in range ``(0.01, 0.99)``.
         """
         if not self.state_data["problem_solved"]:
-            # Partial credit for meaningful diagnostic progress
             progress = self.state_data.get("progress", {})
-            progress_count = sum(1 for v in progress.values() if v)
-            if progress_count > 0:
-                partial = min(0.15, progress_count * 0.05)
-                return round(partial, 2)
+            partial_steps = sum(1 for v in progress.values() if v)
+            if partial_steps > 0:
+                return round(min(0.15, partial_steps * 0.05), 2)
             return 0.01
 
-        # Step efficiency: score decays from 0.99 → 0.30 as steps increase
         step_ratio = self._state.step_count / self.MAX_STEPS
-        efficiency = 0.99 - (step_ratio * 0.69)  # 0.99 at step 0, 0.30 at MAX_STEPS
-
-        raw_score = max(0.30, efficiency)
-        return max(0.01, min(0.99, round(raw_score, 2)))
+        efficiency = 0.99 - (step_ratio * 0.69)  # 0.99 at step 1 → 0.30 at MAX_STEPS
+        return max(0.01, min(0.99, round(max(0.30, efficiency), 2)))
 
     def step(self, action: DevOpsAction) -> DevOpsObservation:  # type: ignore[override]
         """
-        Coordinates the environment state transition for a single discrete step.
-        
+        Applies an action and advances the episode by one step.
+
+        Executes the following pipeline on each call:
+          1. Accumulate infrastructure cost and downtime SLAs.
+          2. Optionally inject a chaos event (p=0.15).
+          3. Resolve any deferred tasks (e.g., async index application).
+          4. Apply progressive degradation to unresolved services.
+          5. Dispatch the agent's command through the action handler.
+
         Args:
-            action: The remediation or diagnostic command provided by the agent.
-            
+            action: A ``DevOpsAction`` specifying the command and target.
+
         Returns:
-            The resulting system observation and step-specific reward signal.
+            Updated ``DevOpsObservation`` with reward and termination flag.
         """
         self._state.step_count += 1
         reward = 0.0
         feedback = ""
         done = False
-        
-        # 1. Increment SLAs
+
+        # Accrue SLA cost and downtime for every degraded service.
         for svc in self.state_data["services"].values():
             self.total_cost += svc["cost_per_minute"]
             if svc["status"] != "running":
                 weight = 2.0 if svc["severity"] == "critical" else 1.0
                 self.total_downtime += weight
 
-        # 2. Stochastic Chaos Injection (Stochastic state transition probability p=0.15)
         if random.random() < 0.15:
             self.trigger_chaos()
             feedback += "\n[ALERT] System anomaly detected. Evaluate telemetry for secondary fault injection.\n"
 
-        # Apply background system dynamics (cost, downtime, chaos, and delayed task processing)
+        # Process deferred tasks. The add_db_index command resolves after a 2-step delay
+        # to model the real-world latency of a live index build on a large table.
         tasks_to_keep = []
         for task in self.delayed_tasks:
             task["delay"] -= 1
             if task["delay"] <= 0:
                 if task["action"] == "add_db_index" and task["target"] == "transactions":
                     self.state_data["problem_solved"] = True
-                    svc = self.state_data["services"]["database"]
-                    svc["latency_ms"] = max(5.0, svc["latency_ms"] * 0.25)
-                    svc["cpu_usage"] = max(25.0, svc["cpu_usage"] * 0.5)
-                    svc["status"] = "running"
-                    self.state_data["services"]["web-frontend"]["error_rate"] = max(0.0, self.state_data["services"]["web-frontend"]["error_rate"] - 5.0)
-                    feedback += f"\n[EVENT] DB index application complete on {task['target']}."
-                    done = True  # Episode ends when the async index resolves the incident
+                    db = self.state_data["services"]["database"]
+                    db["latency_ms"] = max(5.0, db["latency_ms"] * 0.25)
+                    db["cpu_usage"] = max(25.0, db["cpu_usage"] * 0.5)
+                    db["status"] = "running"
+                    self.state_data["services"]["web-frontend"]["error_rate"] = max(
+                        0.0, self.state_data["services"]["web-frontend"]["error_rate"] - 5.0
+                    )
+                    feedback += f"\n[EVENT] DB index applied on {task['target']}. Query plan reoptimized."
+                    done = True
             else:
                 tasks_to_keep.append(task)
         self.delayed_tasks = tasks_to_keep
 
-        # 4. Markov State Transition: Progressive Degradation
+        # Degrade unresolved services each step: latency and error rate increase
+        # as the incident persists. For the hard scenario, database latency
+        # propagates upstream to web-frontend via the causal dependency graph.
         if not self.state_data["problem_solved"]:
-            for name, svc in self.state_data["services"].items():
+            for svc in self.state_data["services"].values():
                 if svc["status"] == "degraded":
                     svc["latency_ms"] = round(min(30000.0, svc["latency_ms"] * 1.05), 1)
                     if svc["error_rate"] > 0:
                         svc["error_rate"] = round(min(100.0, svc["error_rate"] + 1.5), 1)
-            
-            # Causal Graph cascading
+
             if self.task_name == "hard":
                 db_lat = self.state_data["services"]["database"]["latency_ms"]
                 self.state_data["services"]["web-frontend"]["latency_ms"] = round(db_lat * 1.08, 1)
 
         current_action_str = f"{action.command}:{action.target}"
-
-        # Penalize repeated useless action
         if current_action_str == self.last_action_str:
             reward -= 0.1
-            feedback = f"Repeated action: {action.command} on {action.target}."
+            feedback = f"Repeated action '{action.command}' on {action.target} yields no new information."
         self.last_action_str = current_action_str
 
         if self._state.step_count >= self.MAX_STEPS:
             done = True
-            feedback += "\nMaximum episode horizon reached. Handing over to subsequent shift."
+            feedback += "\nEpisode horizon reached. Handing off to on-call successor."
             return self._build_obs(feedback, reward, done)
 
         if action.command == "finish":
             done = True
             if not self.state_data["problem_solved"]:
-                feedback += "Termination requested without resolution. Critical failure penalty applied."
+                feedback += "Episode terminated without incident resolution."
             else:
-                feedback += "Incident resolved successfully."
+                feedback += "Incident resolved. Closing ticket."
             return self._build_obs(feedback, reward, done)
 
-        # Helper method
         def process_logs(target: str) -> str:
-            raw_logs = self.state_data["logs"].get(target, "No logs exist for this target.")
+            raw = self.state_data["logs"].get(target, "No logs found for this target.")
             if action.args:
-                filtered = [line for line in raw_logs.split("\n") if action.args.lower() in line.lower()]
-                if not filtered:
-                    return f"[DEBUG] Grep '{action.args}' returned no results for {target}."
-                return "\n".join(filtered)
-            return raw_logs
+                lines = [l for l in raw.split("\n") if action.args.lower() in l.lower()]
+                return "\n".join(lines) if lines else f"[DEBUG] Pattern '{action.args}' not found in {target} logs."
+            return raw
 
-        # ==================================
-        # Agent Action Processing
-        # ==================================
+        # -------------------------------------------------------------------------
+        # Action dispatch — ordered by command type.
+        # Scale and get_logs are shared across all tasks; remediation commands are
+        # task-specific to enforce correct causal reasoning.
+        # -------------------------------------------------------------------------
+
         if action.command == "get_logs":
             feedback = process_logs(action.target)
-            # Small reward for diagnostic investigation (encourages exploration before acting)
             reward += 0.05
             if self.task_name == "hard" and action.target == "database":
                 self.state_data["progress"]["identified_root"] = True
-                reward += 0.1  # Bonus for identifying the root cause service
+                reward += 0.1  # Bonus for pinpointing the root-cause service
 
         elif action.command == "scale_service":
-            # Scaling is an expensive last resort — not the optimal fix
+            # Horizontal scaling is a valid but expensive mitigation — not a root-cause fix.
             if action.target in self.state_data["services"]:
                 svc = self.state_data["services"][action.target]
                 svc["cost_per_minute"] *= 3.0
                 svc["cpu_usage"] = max(10.0, svc["cpu_usage"] * 0.3)
-                feedback += f"Scaled {action.target} horizontally. Warning: Burn rate tripled!"
-                reward += 0.05  # Small reward — scaling is valid but costly
+                feedback += f"Scaled {action.target}. Infrastructure burn rate tripled."
+                reward += 0.05
             else:
-                feedback += "Target to scale does not exist."
+                feedback += f"Service '{action.target}' not found."
                 reward -= 0.05
 
-        # -----------------------------
-        # EASY LOGIC
-        # -----------------------------
         elif self.task_name == "easy":
             if action.command == "restart_service" and action.target == "auth-api":
                 self.state_data["problem_solved"] = True
@@ -379,16 +385,12 @@ class MyEnvironment(Environment):
                 self.state_data["services"]["auth-api"]["cpu_usage"] = 15.0
                 self.state_data["services"]["auth-api"]["status"] = "running"
                 reward += 0.5
-                feedback += "Successfully restarted auth-api. CPU back to normal."
+                feedback += "Restarted auth-api. Thread pool cleared, CPU normalized."
                 done = True
             elif action.command == "restart_service":
-                # Penalize restarting wrong services
                 reward -= 0.1
-                feedback += f"Restarted {action.target}, but it was not the root cause."
+                feedback += f"Restarted {action.target}, but it is not the root cause."
 
-        # -----------------------------
-        # MEDIUM LOGIC
-        # -----------------------------
         elif self.task_name == "medium":
             if action.command == "rollback_deployment" and action.target == "payment-gateway":
                 self.state_data["problem_solved"] = True
@@ -396,54 +398,51 @@ class MyEnvironment(Environment):
                 self.state_data["services"]["payment-gateway"]["error_rate"] = 0.0
                 self.state_data["services"]["payment-gateway"]["status"] = "running"
                 reward += 0.5
-                feedback += "Rollback requested on payment-gateway."
-                # Don't end immediately unless search index is also fixed (Multi-incident)
+                feedback += "Rolled back payment-gateway to v2.0. Error rate cleared."
+                # Multi-incident: both services must be resolved before episode terminates.
                 if self.state_data["progress"]["search_fixed"]:
                     done = True
             elif action.command == "restart_service" and action.target == "search-index":
                 self.state_data["progress"]["search_fixed"] = True
                 self.state_data["services"]["search-index"]["status"] = "running"
                 reward += 0.2
-                feedback += "Restarted search-index cleanly."
+                feedback += "Restarted search-index. Shard writes resumed."
                 if self.state_data["problem_solved"]:
                     done = True
 
-        # -----------------------------
-        # HARD LOGIC
-        # -----------------------------
         elif self.task_name == "hard":
             if action.command == "add_db_index" and action.target == "transactions":
                 if not self.state_data["progress"]["identified_root"]:
-                    feedback += "Added index blindly! Huge risk taken."
+                    feedback += "Index queued without prior log analysis. High operational risk."
                     reward -= 0.1
                 else:
-                    feedback += "DB Index task queued (Takes 2 steps to apply natively)."
-                # Delayed effect: Add to queue
+                    feedback += "Index build queued on transactions.user_id. Takes effect in 2 steps."
                 self.delayed_tasks.append({"action": action.command, "target": action.target, "delay": 2})
                 reward += 0.2
             elif action.command == "restart_service" and action.target == "redis-cache":
-                # Flush Redis to fix OOM
                 self.state_data["progress"]["redis_fixed"] = True
                 self.state_data["services"]["redis-cache"]["memory_usage"] = 5.0
                 self.state_data["services"]["redis-cache"]["status"] = "running"
                 reward += 0.2
-                feedback += "Restarted redis-cache, memory cleared."
+                feedback += "Restarted redis-cache. OOM condition cleared."
             elif action.command == "restart_service" and action.target == "database":
-                self.total_downtime += 10.0 # Significant SLA penalty for critical persistence layer downtime
-                feedback += "Restarted database. Thundering herd effects detected. SLA Penalty applied."
+                # Restarting the primary DB during active writes is high-risk.
+                self.total_downtime += 10.0
+                feedback += "Restarted database. Thundering herd effects observed. SLA penalty applied."
 
         return self._build_obs(feedback, reward, done)
 
     def _build_obs(self, feedback: str, reward: float, done: bool = False) -> DevOpsObservation:
         """
-        Constructs the observation object for the current step.
-        On terminal steps, the reward IS the final grade score so the
-        evaluator receives a clear, normalized performance signal.
+        Constructs the observation for the current step.
+
+        On terminal steps, the reward is replaced by the final ``grade()`` score
+        so that the evaluator receives a clean, normalized performance signal
+        rather than the raw step reward.
         """
         self.total_reward += reward
 
         if done:
-            # Terminal reward = final grade (clean signal for the evaluator)
             reward = self.grade()
 
         return DevOpsObservation(
@@ -456,27 +455,30 @@ class MyEnvironment(Environment):
             total_downtime=round(self.total_downtime, 2),
             done=done,
             reward=round(reward, 4),
-            metadata={"problem_solved": self.state_data["problem_solved"]}
+            metadata={"problem_solved": self.state_data["problem_solved"]},
         )
 
     @property
     def state(self) -> State:
-        """Current episode state. Safe to call before reset."""
+        """Current episode state. Safe to call before ``reset()``."""
         return self._state
 
     def close(self) -> None:
-        """Cleanup environment resources. Called by the framework on shutdown."""
+        """No-op. Called by the framework on server shutdown."""
         pass
 
     def get_metadata(self) -> EnvironmentMetadata:
         """
-        Returns environment metadata for the OpenEnv framework.
+        Returns environment metadata for framework registration.
 
-        This is called by the evaluator to validate the environment identity
-        and configuration before running benchmark episodes.
+        Called by the evaluator before running benchmark episodes to validate
+        environment identity and configuration.
         """
         return EnvironmentMetadata(
             name="my_env",
-            description="DevOps Incident Management Environment: an SRE simulation where agents diagnose and resolve distributed system failures.",
+            description=(
+                "DevOps Incident Management Environment: an SRE simulation where agents "
+                "diagnose and remediate distributed system failures across three escalating scenarios."
+            ),
             version="0.1.0",
         )

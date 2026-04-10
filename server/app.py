@@ -2,47 +2,40 @@
 # All rights reserved.
 
 """
-FastAPI application for the DevOps Incident Management Environment.
+FastAPI server for the DevOps Incident Management Environment.
 
-This module creates an HTTP server that exposes MyEnvironment
-over HTTP and WebSocket endpoints, compatible with EnvClient.
+Exposes MyEnvironment over HTTP and WebSocket endpoints using the
+OpenEnv create_app factory. All session management, schema generation,
+and concurrent-client handling is delegated to the framework.
 
 Endpoints:
-    - POST /reset: Reset the environment
-    - POST /step: Execute an action
-    - GET /state: Get current environment state
-    - GET /schema: Get action/observation schemas
-    - WS /ws: WebSocket endpoint for persistent sessions
+    POST /reset  — Initialize or restart an episode.
+    POST /step   — Execute a DevOpsAction and receive an observation.
+    GET  /state  — Inspect the current episode state.
+    GET  /schema — Action and observation JSON schemas.
+    GET  /health — Liveness probe for container orchestration.
+    WS   /ws     — WebSocket endpoint for low-latency persistent sessions.
 
 Usage:
-    uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
-    uvicorn server.app:app --host 0.0.0.0 --port 8000 --workers 4
-    python -m server.app
+    uvicorn server.app:app --host 0.0.0.0 --port 8000
+    python -m server.app --host 0.0.0.0 --port 8000
 """
 
 import os
 import sys
 
-# Add project root to sys.path for robust module discovery in all environments
+# Ensure the project root is importable regardless of working directory.
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-
-# API Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o")
-HF_TOKEN = os.getenv("HF_TOKEN")
-# Authentication Priority: Environment Variable > HuggingFace Token > Local Access
-API_KEY = os.getenv("OPENAI_API_KEY") or HF_TOKEN or "local-dev-token"
 
 try:
     from openenv.core.env_server.http_server import create_app
 except Exception as e:  # pragma: no cover
     raise ImportError(
-        "openenv is required for the web interface. Install dependencies with '\n    uv sync\n'"
+        "openenv-core is required. Install dependencies with:\n    uv sync"
     ) from e
 
-# Import models with try/except fallback for in-repo vs standalone
 try:
     from models import DevOpsAction, DevOpsObservation  # type: ignore
 except ImportError:
@@ -54,8 +47,6 @@ except ImportError:
     from my_env_environment import MyEnvironment  # type: ignore
 
 
-
-# Create the OpenEnv-compliant FastAPI application
 app = create_app(
     MyEnvironment,
     DevOpsAction,
@@ -66,25 +57,27 @@ app = create_app(
 
 from fastapi.responses import RedirectResponse
 
+
 @app.get("/")
 def read_root():
-    """Redirects root to the interactive API documentation."""
+    """Redirects to the interactive API documentation."""
     return RedirectResponse(url="/docs")
 
 
-def main(host: str = "0.0.0.0", port: int = 8000):
+def main(host: str = "0.0.0.0", port: int = 8000) -> None:
     """
-    Entry point for direct server execution.
+    Starts the uvicorn server.
 
     Args:
-        host: Interface address (use '0.0.0.0' for Docker/HuggingFace).
-        port: Network port for incoming connections.
+        host: Bind address. Use ``0.0.0.0`` for Docker and Hugging Face Spaces.
+        port: Listening port.
     """
     import uvicorn
 
     print("\n" + "="*60)
-    print(" [SYSTEM] DevOps Incident Management Environment Initializing...")
-    print(f" [URL]    Access Interface: http://{host}:{port}")
+    print(" DevOps Incident Management Environment")
+    print(f" Server: http://{host}:{port}")
+    print(f" Docs:   http://{host}:{port}/docs")
     print("=" * 60 + "\n")
 
     uvicorn.run(app, host=host, port=port, log_level="info")
@@ -93,10 +86,8 @@ def main(host: str = "0.0.0.0", port: int = 8000):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="DevOps Incident Management Environment Server")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", type=str, default="0.0.0.0")
     args = parser.parse_args()
     main(host=args.host, port=args.port)
-
-
