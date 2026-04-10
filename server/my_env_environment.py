@@ -237,6 +237,15 @@ class MyEnvironment(Environment):
 
         self.state_data["alerts"].append(f"CHAOS EVENT: {event} on {victim}")
 
+    def _apply_rubric(self, action: Any, observation: Any) -> float:
+        """
+        Overrides the framework's rubric application to return the computed grade.
+        
+        The automated evaluator invokes this method during 'Task Validation' to
+        verify that the environment's grader returns a valid normalized score.
+        """
+        return self.grade()
+
     def grade(self) -> float:
         """
         Returns the normalized episode performance score.
