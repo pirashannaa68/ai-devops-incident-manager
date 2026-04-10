@@ -329,7 +329,6 @@ class MyEnvironment(Environment):
 
         current_action_str = f"{action.command}:{action.target}"
         if current_action_str == self.last_action_str:
-            reward -= 0.1
             feedback = f"Repeated action '{action.command}' on {action.target} yields no new information."
         self.last_action_str = current_action_str
 
@@ -361,10 +360,8 @@ class MyEnvironment(Environment):
 
         if action.command == "get_logs":
             feedback = process_logs(action.target)
-            reward += 0.05
             if self.task_name == "hard" and action.target == "database":
                 self.state_data["progress"]["identified_root"] = True
-                reward += 0.1  # Bonus for pinpointing the root-cause service
 
         elif action.command == "scale_service":
             # Horizontal scaling is a valid but expensive mitigation — not a root-cause fix.
@@ -373,10 +370,8 @@ class MyEnvironment(Environment):
                 svc["cost_per_minute"] *= 3.0
                 svc["cpu_usage"] = max(10.0, svc["cpu_usage"] * 0.3)
                 feedback += f"Scaled {action.target}. Infrastructure burn rate tripled."
-                reward += 0.05
             else:
                 feedback += f"Service '{action.target}' not found."
-                reward -= 0.05
 
         elif self.task_name == "easy":
             if action.command == "restart_service" and action.target == "auth-api":
@@ -384,11 +379,9 @@ class MyEnvironment(Environment):
                 self.state_data["alerts"] = [a for a in self.state_data["alerts"] if "auth-api" not in a]
                 self.state_data["services"]["auth-api"]["cpu_usage"] = 15.0
                 self.state_data["services"]["auth-api"]["status"] = "running"
-                reward += 0.5
                 feedback += "Restarted auth-api. Thread pool cleared, CPU normalized."
                 done = True
             elif action.command == "restart_service":
-                reward -= 0.1
                 feedback += f"Restarted {action.target}, but it is not the root cause."
 
         elif self.task_name == "medium":
@@ -397,7 +390,6 @@ class MyEnvironment(Environment):
                 self.state_data["alerts"] = [a for a in self.state_data["alerts"] if "payment-gateway" not in a]
                 self.state_data["services"]["payment-gateway"]["error_rate"] = 0.0
                 self.state_data["services"]["payment-gateway"]["status"] = "running"
-                reward += 0.5
                 feedback += "Rolled back payment-gateway to v2.0. Error rate cleared."
                 # Multi-incident: both services must be resolved before episode terminates.
                 if self.state_data["progress"]["search_fixed"]:
@@ -405,7 +397,6 @@ class MyEnvironment(Environment):
             elif action.command == "restart_service" and action.target == "search-index":
                 self.state_data["progress"]["search_fixed"] = True
                 self.state_data["services"]["search-index"]["status"] = "running"
-                reward += 0.2
                 feedback += "Restarted search-index. Shard writes resumed."
                 if self.state_data["problem_solved"]:
                     done = True
@@ -414,16 +405,13 @@ class MyEnvironment(Environment):
             if action.command == "add_db_index" and action.target == "transactions":
                 if not self.state_data["progress"]["identified_root"]:
                     feedback += "Index queued without prior log analysis. High operational risk."
-                    reward -= 0.1
                 else:
                     feedback += "Index build queued on transactions.user_id. Takes effect in 2 steps."
                 self.delayed_tasks.append({"action": action.command, "target": action.target, "delay": 2})
-                reward += 0.2
             elif action.command == "restart_service" and action.target == "redis-cache":
                 self.state_data["progress"]["redis_fixed"] = True
                 self.state_data["services"]["redis-cache"]["memory_usage"] = 5.0
                 self.state_data["services"]["redis-cache"]["status"] = "running"
-                reward += 0.2
                 feedback += "Restarted redis-cache. OOM condition cleared."
             elif action.command == "restart_service" and action.target == "database":
                 # Restarting the primary DB during active writes is high-risk.
