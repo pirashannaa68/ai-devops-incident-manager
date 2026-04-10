@@ -98,19 +98,22 @@ def build_user_prompt(step: int, last_obs: DevOpsObservation, last_reward: float
     return prompt
 
 def log_start(task: str, env: str, model: str):
-    """Emits the standardized episode initiation log."""
-    print(f"[START] task={task} env={env} model={model}")
+    """Emits the standardized [START] episode initiation log."""
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
-    """Emits the standardized per-step transaction log."""
+    """Emits the standardized [STEP] per-step transaction log."""
+    # Sanitize action: collapse to single line, strip whitespace
+    action_clean = action.strip().replace("\n", " ").replace("\r", "")
+    done_str = str(done).lower()  # 'true' / 'false'
     err_str = f" error={error}" if error else ""
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done}{err_str}")
+    print(f"[STEP] step={step} action={action_clean} reward={reward:.4f} done={done_str}{err_str}", flush=True)
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float], cost: float = 0.0, downtime: float = 0.0):
-    """Emits the standardized episode termination log and performance metrics."""
-    print(f"[END] success={success} steps={steps} score={score:.2f} rewards={rewards}")
-    # Additional SLA metrics for internal analysis
-    print(f"[DEBUG] infra_cost={cost:.2f} downtime_penalty={downtime:.1f}", flush=True)
+    """Emits the standardized [END] episode termination log."""
+    success_str = str(success).lower()  # 'true' / 'false'
+    rewards_str = "[" + ",".join(f"{r:.4f}" for r in rewards) + "]"
+    print(f"[END] success={success_str} steps={steps} score={score:.4f} rewards={rewards_str}", flush=True)
 
 def get_random_action() -> str:
     """Generates a non-deterministic exploratory action for baseline evaluation."""
