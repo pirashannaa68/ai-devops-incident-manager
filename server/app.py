@@ -48,7 +48,11 @@ try:
 except ImportError:
     from ..models import DevOpsAction, DevOpsObservation  # type: ignore
 
-from server.my_env_environment import MyEnvironment  # type: ignore
+try:
+    from server.my_env_environment import MyEnvironment  # type: ignore
+except ImportError:
+    from my_env_environment import MyEnvironment  # type: ignore
+
 
 
 # Create the OpenEnv-compliant FastAPI application
