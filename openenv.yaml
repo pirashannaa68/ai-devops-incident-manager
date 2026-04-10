@@ -3,7 +3,7 @@ name: my_env
 type: space
 runtime: fastapi
 app: server.app:app
-port: 8000
+port: 7860
 description: "DevOps Incident Management Environment - a high-fidelity SRE simulation where agents must diagnose and resolve distributed system failures under uncertainty and cost constraints."
 tasks:
   - name: easy
