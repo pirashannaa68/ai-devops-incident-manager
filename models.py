@@ -52,6 +52,9 @@ class DevOpsObservation(Observation):
     Contains system telemetry, active alerts, and feedback from the previous action
     to inform the agent's next decision.
     """
+    # Explicit done/reward fields (required by OpenEnv framework schema validation)
+    done: bool = Field(False, description="Whether the episode is complete")
+    reward: Optional[float] = Field(None, description="Reward for the last action")
     task_description: str = Field(default="", description="Description of the active task or incident")
     active_alerts: List[str] = Field(default_factory=list, description="List of active system alerts")
     services: List[ServiceStatus] = Field(default_factory=list, description="Current status of all system services")
@@ -59,4 +62,5 @@ class DevOpsObservation(Observation):
     step_count: int = Field(default=0, description="Current step count in the simulation episode")
     total_cost: float = Field(default=0.0, description="Cumulative infrastructural cost incurred")
     total_downtime: float = Field(default=0.0, description="Cumulative downtime SLA penalty")
+    metadata: Optional[dict] = Field(default=None, description="Additional episode metadata")
 

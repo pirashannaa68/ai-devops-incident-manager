@@ -230,21 +230,30 @@ class MyEnvironment(Environment):
     def grade(self) -> float:
         """
         Finalizes the episode performance score.
-        
-        The score aggregates resolution success penalized by cumulative steps, 
-        infrastructural burn-rate, and downtime SLA violations.
-        
+
+        Scoring model:
+        - Unsolved episodes receive the minimum score (0.01).
+        - Solved episodes receive a score based on step efficiency:
+            1.0 for instant resolution, decaying to 0.30 at MAX_STEPS.
+        - A small bonus is awarded for resolving before the cost budget expires.
+
         Returns:
-            A normalized floating point score in the range (0.01, 0.99).
+            A normalized float score strictly within (0.01, 0.99).
         """
-        success = 1.0 if self.state_data["problem_solved"] else 0.0
-        
-        # Penalties calculation
-        step_penalty = (self._state.step_count * 0.03)
-        cost_penalty = (self.total_cost * 0.01)
-        downtime_penalty = (self.total_downtime * 0.02)
-        
-        raw_score = success - step_penalty - cost_penalty - downtime_penalty
+        if not self.state_data["problem_solved"]:
+            # Partial credit for meaningful diagnostic progress
+            progress = self.state_data.get("progress", {})
+            progress_count = sum(1 for v in progress.values() if v)
+            if progress_count > 0:
+                partial = min(0.15, progress_count * 0.05)
+                return round(partial, 2)
+            return 0.01
+
+        # Step efficiency: score decays from 0.99 → 0.30 as steps increase
+        step_ratio = self._state.step_count / self.MAX_STEPS
+        efficiency = 0.99 - (step_ratio * 0.69)  # 0.99 at step 0, 0.30 at MAX_STEPS
+
+        raw_score = max(0.30, efficiency)
         return max(0.01, min(0.99, round(raw_score, 2)))
 
     def step(self, action: DevOpsAction) -> DevOpsObservation:  # type: ignore[override]
@@ -340,20 +349,23 @@ class MyEnvironment(Environment):
         # ==================================
         if action.command == "get_logs":
             feedback = process_logs(action.target)
+            # Small reward for diagnostic investigation (encourages exploration before acting)
             reward += 0.05
             if self.task_name == "hard" and action.target == "database":
                 self.state_data["progress"]["identified_root"] = True
+                reward += 0.1  # Bonus for identifying the root cause service
 
         elif action.command == "scale_service":
-            # Action Tradeoff: Scale = temporary fix but heavily increases Cost!
+            # Scaling is an expensive last resort — not the optimal fix
             if action.target in self.state_data["services"]:
                 svc = self.state_data["services"][action.target]
-                svc["cost_per_minute"] *= 3.0  # Spike cost!
+                svc["cost_per_minute"] *= 3.0
                 svc["cpu_usage"] = max(10.0, svc["cpu_usage"] * 0.3)
                 feedback += f"Scaled {action.target} horizontally. Warning: Burn rate tripled!"
-                reward += 0.1
+                reward += 0.05  # Small reward — scaling is valid but costly
             else:
                 feedback += "Target to scale does not exist."
+                reward -= 0.05
 
         # -----------------------------
         # EASY LOGIC
@@ -367,6 +379,10 @@ class MyEnvironment(Environment):
                 reward += 0.5
                 feedback += "Successfully restarted auth-api. CPU back to normal."
                 done = True
+            elif action.command == "restart_service":
+                # Penalize restarting wrong services
+                reward -= 0.1
+                feedback += f"Restarted {action.target}, but it was not the root cause."
 
         # -----------------------------
         # MEDIUM LOGIC
@@ -419,13 +435,14 @@ class MyEnvironment(Environment):
     def _build_obs(self, feedback: str, reward: float, done: bool = False) -> DevOpsObservation:
         """
         Constructs the observation object for the current step.
-        Calculates the terminal reward if the episode is finished.
+        On terminal steps, the reward IS the final grade score so the
+        evaluator receives a clear, normalized performance signal.
         """
         self.total_reward += reward
 
         if done:
-            final_grade = self.grade()
-            reward = final_grade - (self.total_reward - reward)
+            # Terminal reward = final grade (clean signal for the evaluator)
+            reward = self.grade()
 
         return DevOpsObservation(
             task_description=self.state_data["description"],
@@ -436,7 +453,7 @@ class MyEnvironment(Environment):
             total_cost=round(self.total_cost, 2),
             total_downtime=round(self.total_downtime, 2),
             done=done,
-            reward=reward,
+            reward=round(reward, 4),
             metadata={"problem_solved": self.state_data["problem_solved"]}
         )
 
