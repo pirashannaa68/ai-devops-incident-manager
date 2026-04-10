@@ -11,11 +11,11 @@ cost-aware reward structures.
 
 import copy
 import random
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from openenv.core.env_server.interfaces import Environment
-from openenv.core.env_server.types import State
+from openenv.core.env_server.types import State, EnvironmentMetadata
 
 import sys
 import os
@@ -162,12 +162,13 @@ class MyEnvironment(Environment):
         self.total_downtime = 0.0
         self.delayed_tasks = []
 
-    def reset(self, task_name: str = "easy") -> DevOpsObservation:
+    def reset(self, task_name: str = "easy", **kwargs: Any) -> DevOpsObservation:
         """
         Transitions the environment to a fresh state based on the selected task.
         
         Args:
             task_name: Identifier for the scenario configuration (easy, medium, hard).
+            **kwargs: Additional reset parameters accepted for framework compatibility.
             
         Returns:
             The initial DevOpsObservation for the new episode.
@@ -459,4 +460,22 @@ class MyEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        """Current episode state. Safe to call before reset."""
         return self._state
+
+    def close(self) -> None:
+        """Cleanup environment resources. Called by the framework on shutdown."""
+        pass
+
+    def get_metadata(self) -> EnvironmentMetadata:
+        """
+        Returns environment metadata for the OpenEnv framework.
+
+        This is called by the evaluator to validate the environment identity
+        and configuration before running benchmark episodes.
+        """
+        return EnvironmentMetadata(
+            name="my_env",
+            description="DevOps Incident Management Environment: an SRE simulation where agents diagnose and resolve distributed system failures.",
+            version="0.1.0",
+        )
