@@ -80,10 +80,16 @@ The environment includes three primary scenarios with increasing complexity:
 - **Economic Impact**: Minimization of cumulative infrastructure cost and downtime penalties.
 
 ## 8. Baseline Performance
-Expected outcomes based on standard agent implementations:
-- **Random Agent**: Score ≈ 0.01. Primarily fails due to random exploration without resolution.
-- **Rule-based Agent**: Score ≈ 0.40 - 0.60. Successfully resolves simple deterministic scenarios but struggles with cascading failures.
-- **State-of-the-art Agent**: Score ≈ 0.85+. Demonstrates causal reasoning and cost-aware remediation.
+
+Scores are computed by `env.grade()` and fall within `(0.01, 0.99)`.
+
+| Agent | Easy | Medium | Hard | Notes |
+|-------|------|--------|------|-------|
+| Random | 0.01 | 0.01 | 0.01 | No causal reasoning; never resolves incidents |
+| Rule-based | 0.60–0.85 | 0.35–0.60 | 0.05–0.15 | Heuristics handle simple cases; fails cascading failures |
+| LLM (GPT-4o) | 0.85–0.99 | 0.50–0.75 | 0.30–0.60 | Causal reasoning; efficiency varies by prompt depth |
+
+Scores reflect step-efficiency: faster resolution = higher score (0.99 at step 1, 0.30 at step 15).
 
 ## 9. Setup Instructions
 ### Installation

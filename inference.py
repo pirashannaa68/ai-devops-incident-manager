@@ -36,7 +36,10 @@ try:
 except ImportError:
     pass
 
-from models import DevOpsAction, DevOpsObservation  # type: ignore
+try:
+    from models import DevOpsAction, DevOpsObservation  # type: ignore
+except ImportError:
+    from my_env.models import DevOpsAction, DevOpsObservation  # type: ignore
 
 IMAGE_NAME = "openenv/my_env_env:latest"
 
@@ -163,7 +166,10 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str):
     """
     Orchestrates the interaction loop between the agent and the MyEnvironment instance.
     """
-    from server.my_env_environment import MyEnvironment  # type: ignore
+    try:
+        from server.my_env_environment import MyEnvironment  # type: ignore
+    except ImportError:
+        from my_env_environment import MyEnvironment  # type: ignore
     env = MyEnvironment()
 
     history: List[str] = []
@@ -215,9 +221,11 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str):
             if done:
                 break
 
-        score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
-        score = min(max(score, 0.0), 1.0)
-        success = score >= SUCCESS_SCORE_THRESHOLD
+        # Score = environment's final grade (authoritative, in 0.01–0.99)
+        score = env.grade()
+        score = round(min(max(score, 0.0), 1.0), 4)
+        # Success = the environment's own resolution flag (ground truth)
+        success = bool(env.state_data.get("problem_solved", False))
 
     finally:
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards, cost=final_cost, downtime=final_downtime)
