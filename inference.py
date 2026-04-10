@@ -177,13 +177,13 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
     steps_taken = 0
     success = False
     last_error: Optional[str] = None
+    last_reward = 0.01  # Default minimum score if episode crashes setup
 
     model_id = MODEL_NAME if agent_type == "llm" else agent_type
     log_start(task=task_id, env=BENCHMARK, model=model_id)
 
     try:
         obs = env.reset(task_name=task_id)
-        last_reward = 0.0
 
         for step in range(1, MAX_STEPS + 1):
             if obs.done:
@@ -232,7 +232,7 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
 
     finally:
         # [END] always emitted, even on exception
-        log_end(success=success, steps=steps_taken, rewards=rewards)
+        log_end(success=success, steps=max(1, steps_taken), rewards=[last_reward])
 
 
 # ---------------------------------------------------------------------------
