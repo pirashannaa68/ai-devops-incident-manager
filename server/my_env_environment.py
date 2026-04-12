@@ -161,7 +161,7 @@ class MyEnvironment(Environment):
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.state_data = copy.deepcopy(EASY_STATE)
         self.task_name = "easy"
-        self.total_reward = 0.0
+        self.total_reward = 0.10
         self.last_action_str = ""
         self.total_cost = 0.0
         self.total_downtime = 0.0
@@ -180,7 +180,7 @@ class MyEnvironment(Environment):
         """
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.task_name = task_name
-        self.total_reward = 0.01
+        self.total_reward = 0.10
         self.last_action_str = ""
         self.total_cost = 0.0
         self.total_downtime = 0.0
@@ -198,7 +198,7 @@ class MyEnvironment(Environment):
             total_cost=0.0,
             total_downtime=0.0,
             done=False,
-            reward=0.01,
+            reward=0.10,
         )
 
     def trigger_chaos(self) -> None:
@@ -248,22 +248,20 @@ class MyEnvironment(Environment):
         Returns the normalized episode performance score.
 
         Scoring model:
-          - Unresolved episodes: ``0.01`` (or up to ``0.15`` for partial diagnostic progress).
-          - Resolved episodes: ``0.99`` at step 1, decaying linearly to ``0.30`` at MAX_STEPS.
-
         Returns:
-            Float in range ``(0.01, 0.99)``.
+            Float in range ``(0.10, 0.90)``.
         """
         if not self.state_data["problem_solved"]:
             progress = self.state_data.get("progress", {})
             partial_steps = sum(1 for v in progress.values() if v)
             if partial_steps > 0:
-                return round(min(0.15, partial_steps * 0.05), 2)
-            return 0.01
+                # Up to 0.3 for partial progress, starting at 0.15
+                return round(min(0.30, 0.10 + (partial_steps * 0.05)), 2)
+            return 0.10
 
         step_ratio = self._state.step_count / self.MAX_STEPS
-        efficiency = 0.99 - (step_ratio * 0.69)  # 0.99 at step 1 → 0.30 at MAX_STEPS
-        return max(0.01, min(0.99, round(max(0.30, efficiency), 2)))
+        efficiency = 0.90 - (step_ratio * 0.60)  # 0.90 at step 1 → 0.30 at MAX_STEPS
+        return max(0.10, min(0.90, round(max(0.30, efficiency), 2)))
 
     def step(self, action: DevOpsAction) -> DevOpsObservation:  # type: ignore[override]
         """
@@ -283,7 +281,7 @@ class MyEnvironment(Environment):
             Updated ``DevOpsObservation`` with reward and termination flag.
         """
         self._state.step_count += 1
-        reward = 0.01
+        reward = 0.10
         feedback = ""
         done = False
 
@@ -360,8 +358,17 @@ class MyEnvironment(Environment):
 
         if action.command == "get_logs":
             feedback = process_logs(action.target)
-            if self.task_name == "hard" and action.target == "database":
-                self.state_data["progress"]["identified_root"] = True
+            # Update progress tracking for diagnostic actions to inform the grader.
+            if self.task_name == "easy" and action.target == "auth-api":
+                self.state_data["progress"]["checked_logs"] = True
+            elif self.task_name == "medium" and action.target == "payment-gateway":
+                self.state_data["progress"]["checked_logs"] = True
+            elif self.task_name == "hard":
+                if action.target == "web-frontend":
+                    self.state_data["progress"]["checked_frontend_logs"] = True
+                elif action.target == "database":
+                    self.state_data["progress"]["checked_db_logs"] = True
+                    self.state_data["progress"]["identified_root"] = True
 
         elif action.command == "scale_service":
             # Horizontal scaling is a valid but expensive mitigation — not a root-cause fix.
