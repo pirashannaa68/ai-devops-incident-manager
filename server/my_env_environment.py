@@ -35,8 +35,8 @@ from models import DevOpsAction, DevOpsObservation, ServiceStatus  # type: ignor
 
 DISTRACTORS: Dict[str, Dict] = {
     "user-profile-api":   {"status": "running", "severity": "low",    "cpu_usage": 5.0,  "memory_usage": 15.0, "latency_ms": 12.0, "error_rate": 0.01, "cost_per_minute": 0.1},
-    "notification-worker":{"status": "running", "severity": "low",    "cpu_usage": 22.0, "memory_usage": 45.0, "latency_ms": 50.0, "error_rate": 0.0,  "cost_per_minute": 0.2},
-    "redis-cache":        {"status": "running", "severity": "medium", "cpu_usage": 8.0,  "memory_usage": 80.0, "latency_ms": 1.5,  "error_rate": 0.0,  "cost_per_minute": 0.4},
+    "notification-worker":{"status": "running", "severity": "low",    "cpu_usage": 22.0, "memory_usage": 45.0, "latency_ms": 50.0, "error_rate": 0.01, "cost_per_minute": 0.2},
+    "redis-cache":        {"status": "running", "severity": "medium", "cpu_usage": 8.0,  "memory_usage": 80.0, "latency_ms": 1.5,  "error_rate": 0.01, "cost_per_minute": 0.4},
     "search-index":       {"status": "running", "severity": "low",    "cpu_usage": 14.0, "memory_usage": 30.0, "latency_ms": 18.0, "error_rate": 0.05, "cost_per_minute": 0.3},
 }
 
@@ -54,10 +54,10 @@ EASY_STATE: Dict = {
     "description": "On-call Pager: HIGH CPU utilization detected on auth-api. API latency is increasing.",
     "alerts": ["CRITICAL: High CPU on auth-api (99%)"],
     "services": {
-        "web-frontend":   {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 32.0, "latency_ms": 25.0,   "error_rate": 0.01, "cost_per_minute": 1.0},
+        "web-frontend":   {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 32.0, "latency_ms": 25.0,   "error_rate": 0.01, "cost_per_minute": 0.99},
         "auth-api":       {"status": "degraded", "severity": "critical", "cpu_usage": 99.5, "memory_usage": 65.0, "latency_ms": 1540.0, "error_rate": 2.5,  "cost_per_minute": 0.5},
-        "payment-gateway":{"status": "running",  "severity": "critical", "cpu_usage": 10.0, "memory_usage": 40.0, "latency_ms": 50.0,   "error_rate": 0.0,  "cost_per_minute": 2.5},
-        "database":       {"status": "running",  "severity": "critical", "cpu_usage": 35.0, "memory_usage": 55.0, "latency_ms": 5.0,    "error_rate": 0.0,  "cost_per_minute": 3.0},
+        "payment-gateway":{"status": "running",  "severity": "critical", "cpu_usage": 10.0, "memory_usage": 40.0, "latency_ms": 50.0,   "error_rate": 0.01, "cost_per_minute": 2.5},
+        "database":       {"status": "running",  "severity": "critical", "cpu_usage": 35.0, "memory_usage": 55.0, "latency_ms": 5.0,    "error_rate": 0.01, "cost_per_minute": 3.0},
         **DISTRACTORS,
     },
     "logs": {
@@ -77,10 +77,10 @@ MEDIUM_STATE: Dict = {
     "description": "On-call Pager: Elevated Error Rate on payment-gateway following a recent deployment. Search-index is also alerting.",
     "alerts": ["CRITICAL: High Error Rate on payment-gateway (15%)", "WARN: search-index cluster status red"],
     "services": {
-        "web-frontend":   {"status": "running",  "severity": "critical", "cpu_usage": 20.0, "memory_usage": 35.0, "latency_ms": 30.0, "error_rate": 1.5,  "cost_per_minute": 1.0},
-        "auth-api":       {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 40.0, "latency_ms": 20.0, "error_rate": 0.0,  "cost_per_minute": 0.5},
+        "web-frontend":   {"status": "running",  "severity": "critical", "cpu_usage": 20.0, "memory_usage": 35.0, "latency_ms": 30.0, "error_rate": 1.5,  "cost_per_minute": 0.99},
+        "auth-api":       {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 40.0, "latency_ms": 20.0, "error_rate": 0.01, "cost_per_minute": 0.5},
         "payment-gateway":{"status": "degraded", "severity": "critical", "cpu_usage": 12.0, "memory_usage": 45.0, "latency_ms": 65.0, "error_rate": 15.5, "cost_per_minute": 2.5},
-        "database":       {"status": "running",  "severity": "critical", "cpu_usage": 25.0, "memory_usage": 50.0, "latency_ms": 6.0,  "error_rate": 0.0,  "cost_per_minute": 3.0},
+        "database":       {"status": "running",  "severity": "critical", "cpu_usage": 25.0, "memory_usage": 50.0, "latency_ms": 6.0,  "error_rate": 0.01, "cost_per_minute": 3.0},
         **DISTRACTORS,
     },
     "logs": {
@@ -103,9 +103,9 @@ HARD_STATE: Dict = {
     "description": "On-call Pager: web-frontend timeout spike. Database alerts firing. Redis cache memory exhausted.",
     "alerts": ["CRITICAL: web-frontend Response Time > 5000ms", "WARN: database connection pool filling up", "CRITICAL: redis OOM"],
     "services": {
-        "web-frontend":   {"status": "degraded", "severity": "critical", "cpu_usage": 45.0, "memory_usage": 60.0, "latency_ms": 5200.0, "error_rate": 12.0, "cost_per_minute": 1.0},
-        "auth-api":       {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 40.0, "latency_ms": 20.0,   "error_rate": 0.0,  "cost_per_minute": 0.5},
-        "payment-gateway":{"status": "running",  "severity": "critical", "cpu_usage": 12.0, "memory_usage": 45.0, "latency_ms": 65.0,   "error_rate": 0.0,  "cost_per_minute": 2.5},
+        "web-frontend":   {"status": "degraded", "severity": "critical", "cpu_usage": 45.0, "memory_usage": 60.0, "latency_ms": 5200.0, "error_rate": 12.0, "cost_per_minute": 0.99},
+        "auth-api":       {"status": "running",  "severity": "critical", "cpu_usage": 15.0, "memory_usage": 40.0, "latency_ms": 20.0,   "error_rate": 0.01, "cost_per_minute": 0.5},
+        "payment-gateway":{"status": "running",  "severity": "critical", "cpu_usage": 12.0, "memory_usage": 45.0, "latency_ms": 65.0,   "error_rate": 0.01, "cost_per_minute": 2.5},
         "database":       {"status": "degraded", "severity": "critical", "cpu_usage": 88.0, "memory_usage": 90.0, "latency_ms": 4800.0, "error_rate": 1.5,  "cost_per_minute": 3.0},
         **DISTRACTORS,
     },
@@ -161,10 +161,10 @@ class MyEnvironment(Environment):
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.state_data = copy.deepcopy(EASY_STATE)
         self.task_name = "easy"
-        self.total_reward = 0.10
+        self.total_reward = 0.001
         self.last_action_str = ""
-        self.total_cost = 0.0
-        self.total_downtime = 0.0
+        self.total_cost = 0.01
+        self.total_downtime = 0.01
         self.delayed_tasks: List[Dict] = []
 
     def reset(self, task_name: str = "easy", **kwargs: Any) -> DevOpsObservation:
@@ -180,10 +180,10 @@ class MyEnvironment(Environment):
         """
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.task_name = task_name
-        self.total_reward = 0.10
+        self.total_reward = 0.001
         self.last_action_str = ""
-        self.total_cost = 0.0
-        self.total_downtime = 0.0
+        self.total_cost = 0.01
+        self.total_downtime = 0.01
         self.delayed_tasks = []
 
         scenario_map = {"easy": EASY_STATE, "medium": MEDIUM_STATE, "hard": HARD_STATE}
@@ -195,10 +195,10 @@ class MyEnvironment(Environment):
             services=get_service_objects(self.state_data["services"]),
             action_feedback="Environment initialized. Awaiting diagnostic commands.",
             step_count=0,
-            total_cost=0.0,
-            total_downtime=0.0,
+            total_cost=0.01,
+            total_downtime=0.01,
             done=False,
-            reward=0.10,
+            reward=0.001,
         )
 
     def trigger_chaos(self) -> None:
@@ -261,7 +261,9 @@ class MyEnvironment(Environment):
 
         step_ratio = self._state.step_count / self.MAX_STEPS
         efficiency = 0.90 - (step_ratio * 0.60)  # 0.90 at step 1 → 0.30 at MAX_STEPS
-        return max(0.10, min(0.90, round(max(0.30, efficiency), 2)))
+        # Return a score in (0.1, 0.8) to leave room for cumulative reward summation
+        # Max steps = 15, Max sum = 15*0.001 + 0.80 = 0.815 < 1.0
+        return max(0.10, min(0.80, round(max(0.30, efficiency), 3)))
 
     def step(self, action: DevOpsAction) -> DevOpsObservation:  # type: ignore[override]
         """
@@ -281,7 +283,7 @@ class MyEnvironment(Environment):
             Updated ``DevOpsObservation`` with reward and termination flag.
         """
         self._state.step_count += 1
-        reward = 0.10
+        reward = 0.001
         feedback = ""
         done = False
 

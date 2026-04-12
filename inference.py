@@ -157,7 +157,7 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
     steps_taken = 0
     success = False
     last_error: Optional[str] = None
-    last_reward = 0.10
+    last_reward = 0.001
 
     model_id = MODEL_NAME if agent_type == "llm" else agent_type
     log_start(task=task_id, env=BENCHMARK, model=model_id)
@@ -188,7 +188,7 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
 
             obs = env.step(action_obj)
 
-            reward = obs.reward if obs.reward is not None else 0.10
+            reward = obs.reward if obs.reward is not None else 0.001
             done = obs.done
 
             rewards.append(reward)
