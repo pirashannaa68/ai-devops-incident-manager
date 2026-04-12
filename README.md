@@ -1,3 +1,18 @@
+---
+title: DevOps Incident Manager
+emoji: 🛠️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 8000
+pinned: false
+tags:
+  - openenv
+  - devops
+  - sre
+  - evaluation
+---
+
 # DevOps Incident Management Environment (DIME)
 
 DIME is an OpenEnv-compliant simulation platform designed to evaluate automated diagnostic and remediation capabilities within a distributed systems context. The environment models an 8-service production topology, streaming realistic telemetry, structured logs, and system alerts. 
