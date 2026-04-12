@@ -180,7 +180,7 @@ class MyEnvironment(Environment):
         """
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.task_name = task_name
-        self.total_reward = 0.01
+        self.total_reward = 0.0
         self.last_action_str = ""
         self.total_cost = 0.01
         self.total_downtime = 0.01
@@ -195,10 +195,10 @@ class MyEnvironment(Environment):
             services=get_service_objects(self.state_data["services"]),
             action_feedback="Environment initialized. Awaiting diagnostic commands.",
             step_count=0,
-            total_cost=0.01,
-            total_downtime=0.01,
+            total_cost=0.0,
+            total_downtime=0.0,
             done=False,
-            reward=0.01,
+            reward=0.0,
         )
 
     def trigger_chaos(self) -> None:
@@ -262,8 +262,7 @@ class MyEnvironment(Environment):
         step_ratio = self._state.step_count / self.MAX_STEPS
         efficiency = 0.90 - (step_ratio * 0.60)  # 0.90 at step 1 → 0.30 at MAX_STEPS
         # Return a score in (0.1, 0.8) to leave room for cumulative reward summation
-        # Max steps = 15, Max sum = 15*0.001 + 0.80 = 0.815 < 1.0
-        return max(0.10, min(0.80, round(max(0.30, efficiency), 3)))
+        return max(0.10, min(0.90, round(max(0.30, efficiency), 3)))
 
     def step(self, action: DevOpsAction) -> DevOpsObservation:  # type: ignore[override]
         """
@@ -283,7 +282,7 @@ class MyEnvironment(Environment):
             Updated ``DevOpsObservation`` with reward and termination flag.
         """
         self._state.step_count += 1
-        reward = 0.01
+        reward = 0.0
         feedback = ""
         done = False
 
