@@ -48,7 +48,6 @@ DISTRACTOR_LOGS: Dict[str, str] = {
 }
 
 
-# Easy: single degraded service, clearable with a single restart.
 EASY_STATE: Dict = {
     "task_name": "easy",
     "description": "On-call Pager: HIGH CPU utilization detected on auth-api. API latency is increasing.",
@@ -71,7 +70,6 @@ EASY_STATE: Dict = {
     "progress": {"checked_logs": False},
 }
 
-# Medium: concurrent incidents — bad deployment and secondary disk failure.
 MEDIUM_STATE: Dict = {
     "task_name": "medium",
     "description": "On-call Pager: Elevated Error Rate on payment-gateway following a recent deployment. Search-index is also alerting.",
@@ -95,9 +93,6 @@ MEDIUM_STATE: Dict = {
     "progress": {"checked_logs": False, "search_fixed": False},
 }
 
-# Hard: cascading failure — DB index miss causing full table scans, propagating
-# latency to web-frontend, with a concurrent Redis OOM. The fix requires
-# identifying the root cause before queuing the index, which takes 2 steps.
 HARD_STATE: Dict = {
     "task_name": "hard",
     "description": "On-call Pager: web-frontend timeout spike. Database alerts firing. Redis cache memory exhausted.",
@@ -255,13 +250,11 @@ class MyEnvironment(Environment):
             progress = self.state_data.get("progress", {})
             partial_steps = sum(1 for v in progress.values() if v)
             if partial_steps > 0:
-                # Up to 0.3 for partial progress, starting at 0.15
                 return round(min(0.30, 0.10 + (partial_steps * 0.05)), 2)
             return 0.10
 
         step_ratio = self._state.step_count / self.MAX_STEPS
         efficiency = 0.80 - (step_ratio * 0.50)
-        # Bounded heavily so `sum(rewards)` cannot exceed 1.0, even with 15 steps of 0.01
         return max(0.10, min(0.79, round(max(0.30, efficiency), 3)))
 
     def step(self, action: DevOpsAction) -> DevOpsObservation:  # type: ignore[override]
@@ -286,7 +279,6 @@ class MyEnvironment(Environment):
         feedback = ""
         done = False
 
-        # Accrue SLA cost and downtime for every degraded service.
         for svc in self.state_data["services"].values():
             self.total_cost += svc["cost_per_minute"]
             if svc["status"] != "running":
@@ -297,8 +289,6 @@ class MyEnvironment(Environment):
             self.trigger_chaos()
             feedback += "\n[ALERT] System anomaly detected. Evaluate telemetry for secondary fault injection.\n"
 
-        # Process deferred tasks. The add_db_index command resolves after a 2-step delay
-        # to model the real-world latency of a live index build on a large table.
         tasks_to_keep = []
         for task in self.delayed_tasks:
             task["delay"] -= 1
@@ -318,9 +308,6 @@ class MyEnvironment(Environment):
                 tasks_to_keep.append(task)
         self.delayed_tasks = tasks_to_keep
 
-        # Degrade unresolved services each step: latency and error rate increase
-        # as the incident persists. For the hard scenario, database latency
-        # propagates upstream to web-frontend via the causal dependency graph.
         if not self.state_data["problem_solved"]:
             for svc in self.state_data["services"].values():
                 if svc["status"] == "degraded":
@@ -359,7 +346,6 @@ class MyEnvironment(Environment):
 
         if action.command == "get_logs":
             feedback = process_logs(action.target)
-            # Update progress tracking for diagnostic actions to inform the grader.
             if self.task_name == "easy" and action.target == "auth-api":
                 self.state_data["progress"]["checked_logs"] = True
             elif self.task_name == "medium" and action.target == "payment-gateway":
@@ -372,7 +358,6 @@ class MyEnvironment(Environment):
                     self.state_data["progress"]["identified_root"] = True
 
         elif action.command == "scale_service":
-            # Horizontal scaling is a valid but expensive mitigation — not a root-cause fix.
             if action.target in self.state_data["services"]:
                 svc = self.state_data["services"][action.target]
                 svc["cost_per_minute"] *= 3.0
@@ -426,7 +411,6 @@ class MyEnvironment(Environment):
                 self.total_downtime += 10.0
                 feedback += "Restarted database. Thundering herd effects observed. SLA penalty applied."
 
-        # Force episode termination if the max step limit is reached to ensure grading occurs.
         if self._state.step_count >= getattr(self, "MAX_STEPS", 15):
             done = True
 

@@ -16,7 +16,6 @@ from openai import OpenAI
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-4o")
 
-# Fallback to local huggingface-cli cache if the env var isn't explicitly set
 try:
     from huggingface_hub import get_token
     fallback_token = get_token()
@@ -211,7 +210,6 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
         if not rewards:
             rewards = [0.05]
         
-        # Ensure length matches steps, and no float is exactly 0.0 or 1.0 internally.
         safe_rewards = [max(0.01, min(0.99, float(r))) for r in rewards]
         log_end(success=success, steps=max(1, steps_taken), rewards=safe_rewards)
 

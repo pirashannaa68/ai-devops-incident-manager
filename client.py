@@ -48,8 +48,6 @@ class DevOpsEnv(
             A StepResult containing the validated DevOpsObservation and step signal.
         """
         observation_dict = payload.get("observation", {})
-        
-        # Pydantic reconstructs the nested models and nested service telemetry
         observation = DevOpsObservation(**observation_dict)
 
         return StepResult(
