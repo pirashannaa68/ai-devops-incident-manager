@@ -210,7 +210,7 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
 
             obs = env.step(action_obj)
 
-            reward = obs.reward if obs.reward is not None else 0.0
+            reward = obs.reward if obs.reward is not None else 0.01
             done = obs.done
 
             rewards.append(reward)
