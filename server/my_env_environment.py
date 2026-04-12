@@ -33,10 +33,6 @@ if project_root not in sys.path:
 from models import DevOpsAction, DevOpsObservation, ServiceStatus  # type: ignore
 
 
-# ---------------------------------------------------------------------------
-# Distractor services — healthy background nodes included in every scenario
-# to evaluate the agent's ability to discriminate signal from noise.
-# ---------------------------------------------------------------------------
 DISTRACTORS: Dict[str, Dict] = {
     "user-profile-api":   {"status": "running", "severity": "low",    "cpu_usage": 5.0,  "memory_usage": 15.0, "latency_ms": 12.0, "error_rate": 0.01, "cost_per_minute": 0.1},
     "notification-worker":{"status": "running", "severity": "low",    "cpu_usage": 22.0, "memory_usage": 45.0, "latency_ms": 50.0, "error_rate": 0.0,  "cost_per_minute": 0.2},
@@ -51,12 +47,6 @@ DISTRACTOR_LOGS: Dict[str, str] = {
     "search-index":        "2026-04-05T10:00 [INFO] Cluster state green.\n2026-04-05T10:01 [DEBUG] Indexing 120 documents.",
 }
 
-
-# ---------------------------------------------------------------------------
-# Scenario definitions — one per task difficulty level.
-# Each scenario encodes the initial service topology, pre-seeded log corpus,
-# failure description, and a progress tracker for partial-credit scoring.
-# ---------------------------------------------------------------------------
 
 # Easy: single degraded service, clearable with a single restart.
 EASY_STATE: Dict = {
@@ -153,13 +143,13 @@ class MyEnvironment(Environment):
     DevOps Incident Manager — OpenEnv MDP implementation.
 
     Simulates a production SRE on-call workflow across three scenarios
-    of increasing complexity (easy → medium → hard). At each step, the
-    agent issues a command from the discrete action space and receives
+    of increasing complexity (easy, medium, hard). At each step, the
+    controller issues a command from the discrete action space and receives
     an observation containing updated telemetry and action feedback.
 
     Reward is shaped to encourage efficient, root-cause-first remediation.
     A stochastic chaos engine (p=0.15) injects secondary faults to prevent
-    the agent from exploiting a fixed failure pattern across episodes.
+    the controller from exploiting a fixed failure pattern across episodes.
 
     The environment is fully self-contained and requires no external services.
     """
@@ -217,7 +207,7 @@ class MyEnvironment(Environment):
 
         Simulates unexpected infrastructure anomalies that are independent of
         the primary incident. Called with probability 0.15 at each step to
-        prevent agents from relying on a fixed failure signature.
+        prevent controllers from relying on a fixed failure signature.
         """
         healthy_targets = [k for k, v in self.state_data["services"].items() if v["status"] == "running"]
         if not healthy_targets:
@@ -284,7 +274,7 @@ class MyEnvironment(Environment):
           2. Optionally inject a chaos event (p=0.15).
           3. Resolve any deferred tasks (e.g., async index application).
           4. Apply progressive degradation to unresolved services.
-          5. Dispatch the agent's command through the action handler.
+          5. Dispatch the command through the action handler.
 
         Args:
             action: A ``DevOpsAction`` specifying the command and target.
@@ -367,12 +357,6 @@ class MyEnvironment(Environment):
                 lines = [l for l in raw.split("\n") if action.args.lower() in l.lower()]
                 return "\n".join(lines) if lines else f"[DEBUG] Pattern '{action.args}' not found in {target} logs."
             return raw
-
-        # -------------------------------------------------------------------------
-        # Action dispatch — ordered by command type.
-        # Scale and get_logs are shared across all tasks; remediation commands are
-        # task-specific to enforce correct causal reasoning.
-        # -------------------------------------------------------------------------
 
         if action.command == "get_logs":
             feedback = process_logs(action.target)
@@ -485,7 +469,7 @@ class MyEnvironment(Environment):
         return EnvironmentMetadata(
             name="my_env",
             description=(
-                "DevOps Incident Management Environment: an SRE simulation where agents "
+                "DevOps Incident Management Environment: an SRE simulation where controllers "
                 "diagnose and remediate distributed system failures across three escalating scenarios."
             ),
             version="0.1.0",

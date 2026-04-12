@@ -2,10 +2,8 @@
 # All rights reserved.
 
 """
-Inference Benchmark Runner for the DevOps Incident Management Environment (DIME).
-
-Runs easy/medium/hard SRE scenarios against random, rule-based, and LLM agents.
-Emits [START], [STEP], [END] lines compliant with the OpenEnv evaluation spec.
+Inference Benchmark Runner for the DevOps Incident Management Environment.
+Executes diagnostic and remediation scenarios across predefined control systems. Emits structurally compliant OpenEnv evaluation traces.
 """
 
 import os
@@ -15,9 +13,6 @@ import json
 from typing import List, Optional
 from openai import OpenAI
 
-# ---------------------------------------------------------------------------
-# Environment Variables  (per OpenEnv hackathon spec)
-# ---------------------------------------------------------------------------
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-4o")
 HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN")
@@ -25,23 +20,17 @@ HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN")
 if HF_TOKEN is None:
     raise ValueError("HF_TOKEN environment variable is required")
 
-# ---------------------------------------------------------------------------
-# Model imports (try/except for Docker vs local path differences)
-# ---------------------------------------------------------------------------
 try:
     from models import DevOpsAction, DevOpsObservation  # type: ignore
 except ImportError:
     from my_env.models import DevOpsAction, DevOpsObservation  # type: ignore
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 BENCHMARK = "DevOps"
 TEMPERATURE = 0.0
 MAX_TOKENS = 512
 MAX_STEPS = 15
 
-SYSTEM_PROMPT = """
+SYSTEM_INSTRUCTION = """
 You are a Site Reliability Engineer (SRE) managing a distributed 8-service topology.
 The environment simulates dynamic and uncertain incident scenarios.
 
@@ -60,23 +49,15 @@ COMMANDS: "get_logs", "restart_service", "rollback_deployment", "add_db_index", 
 TARGETS: service names (e.g., "auth-api", "payment-gateway", "database", "web-frontend", "redis-cache", "search-index") or table names (e.g., "transactions")
 Use `args` with "get_logs" to filter logs (e.g., "ERROR").
 
-Respond ONLY with a valid JSON object. No markdown. No explanation.
+Respond ONLY with a valid JSON object. No explanation.
 Example: {"command": "get_logs", "target": "database", "args": "ERROR"}
 """
-
-# ---------------------------------------------------------------------------
-# Log helpers — EXACT format required by OpenEnv evaluation spec
-# [START] task=<task_name> env=<benchmark> model=<model_name>
-# [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-# [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
-# ---------------------------------------------------------------------------
 
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str] = None) -> None:
-    # Collapse action to single line (no embedded newlines)
     action_clean = action.strip().replace("\n", " ").replace("\r", "")
     done_str = "true" if done else "false"
     error_str = error if error is not None else "null"
@@ -85,14 +66,9 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 
 def log_end(success: bool, steps: int, rewards: List[float]) -> None:
     success_str = "true" if success else "false"
-    # rewards: comma-separated, 2 decimal places, NO brackets
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(f"[END] success={success_str} steps={steps} rewards={rewards_str}", flush=True)
 
-
-# ---------------------------------------------------------------------------
-# Agent action generators
-# ---------------------------------------------------------------------------
 
 def get_random_action() -> str:
     commands = ["get_logs", "restart_service", "rollback_deployment", "add_db_index", "scale_service", "wait", "finish"]
@@ -124,30 +100,30 @@ def get_rule_based_action(last_obs: DevOpsObservation) -> str:
     return json.dumps({"command": "wait", "target": "none"})
 
 
-def build_user_prompt(step: int, last_obs: DevOpsObservation, last_reward: float, history: List[str]) -> str:
-    prompt = f"[SRE DASHBOARD] Step: {step}/{MAX_STEPS} | Last Reward: {last_reward:+.2f}\n"
-    prompt += f"Infrastructure Cost: ${last_obs.total_cost:.2f} | Downtime Penalty: {last_obs.total_downtime:.1f}s\n\n"
-    prompt += f"ACTIVE INCIDENT: {last_obs.task_description}\n"
-    prompt += f"ALERTS: {', '.join(last_obs.active_alerts) if last_obs.active_alerts else 'None'}\n\n"
-    prompt += "SERVICE TOPOLOGY:\n"
+def build_system_input(step: int, last_obs: DevOpsObservation, last_reward: float, history: List[str]) -> str:
+    payload = f"[SRE DASHBOARD] Step: {step}/{MAX_STEPS} | Last Reward: {last_reward:+.2f}\n"
+    payload += f"Infrastructure Cost: ${last_obs.total_cost:.2f} | Downtime Penalty: {last_obs.total_downtime:.1f}s\n\n"
+    payload += f"ACTIVE INCIDENT: {last_obs.task_description}\n"
+    payload += f"ALERTS: {', '.join(last_obs.active_alerts) if last_obs.active_alerts else 'None'}\n\n"
+    payload += "SERVICE TOPOLOGY:\n"
     for s in last_obs.services:
         sev_tag = f"[{s.severity.upper()}]" if hasattr(s, "severity") else ""
-        prompt += f"  {sev_tag} {s.name}: {s.status} | CPU: {s.cpu_usage:.1f}% | Mem: {s.memory_usage:.1f}% | Latency: {s.latency_ms:.0f}ms | Errors: {s.error_rate:.1f}%\n"
-    prompt += f"\nACTION FEEDBACK:\n{last_obs.action_feedback}\n"
+        payload += f"  {sev_tag} {s.name}: {s.status} | CPU: {s.cpu_usage:.1f}% | Mem: {s.memory_usage:.1f}% | Latency: {s.latency_ms:.0f}ms | Errors: {s.error_rate:.1f}%\n"
+    payload += f"\nACTION FEEDBACK:\n{last_obs.action_feedback}\n"
     if history:
-        prompt += "\nRECENT HISTORY:\n" + "\n".join(history[-4:]) + "\n"
-    prompt += '\nRespond with JSON: {"command": "...", "target": "...", "args": "..."}'
-    return prompt
+        payload += "\nRECENT HISTORY:\n" + "\n".join(history[-4:]) + "\n"
+    payload += '\nRespond with JSON: {"command": "...", "target": "...", "args": "..."}'
+    return payload
 
 
 def get_model_action(client: OpenAI, step: int, last_obs: DevOpsObservation, last_reward: float, history: List[str]) -> str:
-    user_prompt = build_user_prompt(step, last_obs, last_reward, history)
+    user_input = build_system_input(step, last_obs, last_reward, history)
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "user", "content": user_input},
             ],
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
@@ -159,12 +135,8 @@ def get_model_action(client: OpenAI, step: int, last_obs: DevOpsObservation, las
         return json.dumps({"command": "wait", "target": "none"})
 
 
-# ---------------------------------------------------------------------------
-# Main episode runner
-# ---------------------------------------------------------------------------
-
 async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
-    """Orchestrates one full episode between agent and MyEnvironment."""
+    """Orchestrates one full episode evaluation sequence against the environment."""
     try:
         from server.my_env_environment import MyEnvironment  # type: ignore
     except ImportError:
@@ -177,7 +149,7 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
     steps_taken = 0
     success = False
     last_error: Optional[str] = None
-    last_reward = 0.01  # Default minimum score if episode crashes setup
+    last_reward = 0.01
 
     model_id = MODEL_NAME if agent_type == "llm" else agent_type
     log_start(task=task_id, env=BENCHMARK, model=model_id)
@@ -191,7 +163,6 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
 
             last_error = None
 
-            # --- choose action ---
             if agent_type == "random":
                 action_json = get_random_action()
             elif agent_type == "rule-based":
@@ -199,7 +170,6 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
             else:
                 action_json = get_model_action(client, step, obs, last_reward, history)
 
-            # --- parse and apply action ---
             try:
                 action_dict = json.loads(action_json)
                 action_obj = DevOpsAction(**action_dict)
@@ -223,7 +193,6 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
             if done:
                 break
 
-        # Ground-truth success from the environment
         success = bool(env.state_data.get("problem_solved", False))
 
     except Exception as episode_err:
@@ -231,24 +200,19 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
         success = False
 
     finally:
-        # [END] always emitted, even on exception
         log_end(success=success, steps=max(1, steps_taken), rewards=[last_reward])
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
 async def main() -> None:
-    """Run the full evaluation curriculum: 3 tasks × 3 agent types."""
+    """Executes the full distributed evaluation curriculum."""
     client = OpenAI(
         base_url=API_BASE_URL,
-        api_key=HF_TOKEN,  # HF_TOKEN used as api_key per spec
+        api_key=HF_TOKEN,
     )
 
     for task_name in ["easy", "medium", "hard"]:
-        for agent in ["random", "rule-based", "llm"]:
-            await run_scenario(client, task_name, agent)
+        for controller in ["random", "rule-based", "llm"]:
+            await run_scenario(client, task_name, controller)
 
 
 if __name__ == "__main__":
