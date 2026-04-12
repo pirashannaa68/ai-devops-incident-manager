@@ -161,7 +161,7 @@ class MyEnvironment(Environment):
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.state_data = copy.deepcopy(EASY_STATE)
         self.task_name = "easy"
-        self.total_reward = 0.001
+        self.total_reward = 0.01
         self.last_action_str = ""
         self.total_cost = 0.01
         self.total_downtime = 0.01
@@ -180,7 +180,7 @@ class MyEnvironment(Environment):
         """
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self.task_name = task_name
-        self.total_reward = 0.001
+        self.total_reward = 0.01
         self.last_action_str = ""
         self.total_cost = 0.01
         self.total_downtime = 0.01
@@ -198,7 +198,7 @@ class MyEnvironment(Environment):
             total_cost=0.01,
             total_downtime=0.01,
             done=False,
-            reward=0.001,
+            reward=0.01,
         )
 
     def trigger_chaos(self) -> None:
@@ -283,7 +283,7 @@ class MyEnvironment(Environment):
             Updated ``DevOpsObservation`` with reward and termination flag.
         """
         self._state.step_count += 1
-        reward = 0.001
+        reward = 0.01
         feedback = ""
         done = False
 
