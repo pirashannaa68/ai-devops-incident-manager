@@ -15,10 +15,18 @@ from openai import OpenAI
 
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-4o")
-HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN")
+
+# Fallback to local huggingface-cli cache if the env var isn't explicitly set
+try:
+    from huggingface_hub import get_token
+    fallback_token = get_token()
+except ImportError:
+    fallback_token = None
+
+HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN") or fallback_token
 
 if HF_TOKEN is None:
-    raise ValueError("HF_TOKEN environment variable is required")
+    raise ValueError("HF_TOKEN environment variable (or huggingface-cli login) is required")
 
 try:
     from models import DevOpsAction, DevOpsObservation  # type: ignore
