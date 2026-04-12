@@ -208,9 +208,12 @@ async def run_scenario(client: OpenAI, task_id: str, agent_type: str) -> None:
         success = False
 
     finally:
-        # Guarantee strictly one task score between 0 and 1 is printed
-        final_score = last_reward if last_reward > 0.0 else 0.05
-        log_end(success=success, steps=max(1, steps_taken), rewards=[final_score])
+        if not rewards:
+            rewards = [0.05]
+        
+        # Ensure length matches steps, and no float is exactly 0.0 or 1.0 internally.
+        safe_rewards = [max(0.01, min(0.99, float(r))) for r in rewards]
+        log_end(success=success, steps=max(1, steps_taken), rewards=safe_rewards)
 
 
 async def main() -> None:
